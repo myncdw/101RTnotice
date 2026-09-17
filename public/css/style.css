@@ -322,6 +322,22 @@ body {
 
 .identity-stack { margin-top: 22px; }
 
+/* 退出房间：危险操作，用红色文字区分 */
+.leave-btn {
+  display: block;
+  width: 100%;
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 38%, transparent);
+}
+
+.forget-btn {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 38%, transparent);
+}
+
 /* ============================================================
    弹窗 / 提示
    ============================================================ */

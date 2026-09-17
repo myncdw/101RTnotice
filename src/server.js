@@ -279,7 +279,7 @@ async function main() {
   // 重启后重建所有未到期的存活期定时器
   expiry.restoreAll(rooms);
 
-  // 24 小时无 A 端轮询即回收房间；顺带回写心跳
+  // 6 小时无 A 端轮询即回收房间；顺带回写心跳
   sweepTimer = setInterval(async () => {
     try {
       const removed = await store.sweep();

@@ -17,7 +17,7 @@ services:
     ports:
       - "8686:8686"
     environment:
-      # 服务器时间时区：影响存活期销毁、房间回收（24h 无 A 端轮询）
+      # 服务器时间时区：影响存活期销毁、房间回收（6h 无 A 端轮询）
       TZ: Asia/Shanghai
       PORT: "8686"
       DATA_DIR: /data

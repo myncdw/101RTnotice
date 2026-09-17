@@ -363,7 +363,7 @@ async function destroyMessage(roomId) {
   return room;
 }
 
-/** 房间回收：连续 24 小时无 A 端轮询 */
+/** 房间回收：连续 6 小时无 A 端轮询 */
 async function sweep() {
   const now = Date.now();
   const expired = [];

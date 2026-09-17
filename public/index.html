@@ -40,6 +40,7 @@
         <div class="identity-stack">
           <button id="btnView" class="big-btn" type="button">查看</button>
           <button id="btnEdit" class="big-btn" type="button">编辑</button>
+          <button id="btnLeave" class="ghost-btn leave-btn" type="button">退出房间</button>
         </div>
       </section>
 
@@ -117,6 +118,9 @@
         </div>
 
         <button id="btnSaveSettings" class="primary-btn" type="button">保存设置</button>
+        <button id="btnForgetPassword" class="ghost-btn forget-btn is-hidden" type="button">
+          忘记本机保存的密码
+        </button>
         <p class="error-text is-hidden" id="settingsError"></p>
         <p class="ok-text is-hidden" id="settingsSaved"></p>
       </section>
@@ -174,6 +178,7 @@
                  placeholder="未加密的房间请留空" />
         </label>
         <button id="btnJoin" class="primary-btn" type="button">加入房间</button>
+        <p class="panel-hint is-hidden" id="joinHint"></p>
         <p class="error-text is-hidden" id="joinError"></p>
       </div>
     </div>

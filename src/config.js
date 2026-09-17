@@ -20,8 +20,8 @@ module.exports = {
   roomIdLength: 4,
   /** 房间号字符集：字母 + 数字 */
   roomIdAlphabet: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
-  /** 连续 24 小时无 A 端轮询即回收房间 */
-  roomRecycleMs: 24 * 60 * 60 * 1000,
+  /** 连续 6 小时无 A 端轮询即回收房间 */
+  roomRecycleMs: 6 * 60 * 60 * 1000,
   /** 巡检间隔（同时用于回写 lastSeenA） */
   sweepIntervalMs: 60 * 1000,
 

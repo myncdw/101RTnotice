@@ -319,17 +319,26 @@
     // 重置入口弹窗
     $('customRoomInput').value = '';
     $('createPassword').value = '';
-    $('joinPassword').value = '';
     $('btnCopyRoom').disabled = true;
     $('btnCreateEnter').disabled = true;
     $('btnCreate').disabled = false;
     $('btnCreate').textContent = '创建房间';
-    $('joinInput').value = '';
-    $('joinPassword').value = '';
     hide($('joinError'));
     hide($('createError'));
     hide($('dialogModal'));
     switchTab('create');
+
+    // 用「加入过的房间」预填加入面板：退出房间后重新加入不用再输密码
+    const last = RTN.knownRooms.latest();
+    $('joinInput').value = last ? last.roomId : '';
+    $('joinPassword').value = last && last.password ? last.password : '';
+    if (last && last.password) {
+      $('joinHint').textContent = `已记住房间 ${last.roomId} 的密码，切到「加入」点一下即可进入`;
+      show($('joinHint'));
+    } else {
+      hide($('joinHint'));
+    }
+
     show($('entryModal'));
   }
 
@@ -503,6 +512,7 @@
       const payload = await API.createRoom(roomId, enc);
       state.pendingRoomId = payload.roomId;
       state.pendingPassword = password || null;
+      RTN.knownRooms.remember(payload.roomId, password || null);
       $('btnCopyRoom').disabled = false;
       $('btnCreateEnter').disabled = false;
       RTN.toast(password ? '加密房间已创建' : '房间已创建');
@@ -581,6 +591,7 @@
       state.roomId = roomId;
       state.password = password;
       RTN.session.set({ roomId, role: null, password });
+      RTN.knownRooms.remember(roomId, password);
       enterRoom(null);
     } catch (err) {
       errEl.textContent = err.code === 'ROOM_NOT_FOUND' ? '房间不存在' : '连接失败，请重试';
@@ -604,7 +615,23 @@
       const el = $(id);
       const cleaned = (el.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, ROOM_ID_LENGTH);
       if (cleaned !== el.value) el.value = cleaned;
+      if (id === 'joinInput') syncKnownPassword();
     });
+  }
+
+  /** 加入面板：输入的房间号若之前加入过，自动把密码填上（不覆盖已输入的内容） */
+  function syncKnownPassword() {
+    const roomId = ($('joinInput').value || '').trim().toUpperCase();
+    const hint = $('joinHint');
+    const known = ROOM_ID_RE.test(roomId) ? RTN.knownRooms.get(roomId) : null;
+
+    if (known && known.password) {
+      if (!$('joinPassword').value) $('joinPassword').value = known.password;
+      hint.textContent = `已记住房间 ${roomId} 的密码`;
+      show(hint);
+      return;
+    }
+    hide(hint);
   }
 
   // ================================================================
@@ -620,6 +647,35 @@
   });
 
   $('btnEdit').addEventListener('click', () => setRole('edit'));
+
+  // 退出房间：只清当前会话，已记住的房间密码保留，方便一键重新加入
+  $('btnLeave').addEventListener('click', async () => {
+    const ok = await RTN.dialog({
+      title: '退出房间',
+      text: `确定退出房间 ${state.roomId} 吗？\n\n房间号与密码会保留在本机，下次可以直接重新加入。`,
+      okText: '退出',
+      cancelText: '取消',
+    });
+    if (!ok) return;
+    RTN.session.clear();
+    showEntry();
+    RTN.toast('已退出房间');
+  });
+
+  // 忘记密码：连同小账本一起清除，下次必须重新输入
+  $('btnForgetPassword').addEventListener('click', async () => {
+    const ok = await RTN.dialog({
+      title: '忘记本机保存的密码',
+      text: '清除后需要重新输入密码才能进入本房间。通知本身不会受影响。',
+      okText: '清除',
+      cancelText: '取消',
+    });
+    if (!ok) return;
+    RTN.knownRooms.forget(state.roomId);
+    RTN.session.clear();
+    showEntry();
+    RTN.toast('已清除本机保存的密码');
+  });
 
   $('btnHome').addEventListener('click', () => goTo('identity'));
 
@@ -842,6 +898,7 @@
     $('setNightStart').value = state.settings.nightStart || '';
     $('setNightEnd').value = state.settings.nightEnd || '';
     $('encInfo').textContent = state.enc ? '已开启（通知以密文存储）' : '未开启';
+    $('btnForgetPassword').classList.toggle('is-hidden', !state.enc);
     hide($('settingsError'));
     $('settingsError').textContent = '';
     hide($('settingsSaved'));
