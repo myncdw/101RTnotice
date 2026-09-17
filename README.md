@@ -78,18 +78,97 @@ npm install
 DATA_DIR=./data PORT=8686 npm start
 ```
 
-### 2.5 构建时拉不到基础镜像怎么办
+### 2.5 网络受限的机器：代理与镜像源
 
-若 `docker build` 报 `failed to resolve source metadata for docker.io/library/node:22-alpine`（Docker Hub 不可达），
-先用国内加速源把基础镜像拉下来并打上本地标签，再构建即可：
+#### 2.5.1 为什么 `HTTP_PROXY=... docker compose up --build` 传不进去
+
+这是最常见的坑。**Docker 23+ 默认用 BuildKit，它不会读取命令行前的环境变量**，
+所以下面这种写法里，代理只给了 `docker compose` 这个客户端进程，**构建容器里根本看不到**：
 
 ```bash
-docker pull docker.m.daocloud.io/library/node:22-alpine
-docker tag  docker.m.daocloud.io/library/node:22-alpine node:22-alpine
-docker build -t 101rtnotice:1.0.0 .
+# ❌ 在 BuildKit 下无效
+HTTP_PROXY=http://192.168.31.158:7890 HTTPS_PROXY=http://192.168.31.158:7890 \
+  docker compose up -d --build
 ```
 
-或给 Docker 配置全局加速器（`/etc/docker/daemon.json` 的 `registry-mirrors`，需 root 并重启 dockerd）。
+（老的 legacy builder 会自动读取这些变量并注入，所以网上的老帖子会让你这么做。）
+
+BuildKit 下代理必须**显式**传递。本仓库已经配好了 **方式 A**，直接用就行。
+
+#### 2.5.2 方式 A：走 `build.args`（本仓库已内置，推荐）
+
+`Dockerfile` 里声明了 `ARG HTTP_PROXY / HTTPS_PROXY / NO_PROXY`，
+`docker-compose.yml` 里把它们接到宿主机环境变量上，所以下面这条命令**现在可以直接用了**：
+
+```bash
+HTTP_PROXY=http://192.168.31.158:7890 \
+HTTPS_PROXY=http://192.168.31.158:7890 \
+docker compose up -d --build
+```
+
+不需要代理的机器什么都不用设，留空即直连。
+验证代理是否真的进去了（把代理换成一个必然连不上的地址，npm 会立刻失败）：
+
+```bash
+HTTP_PROXY=http://127.0.0.1:1 docker compose build --no-cache
+```
+
+> `ARG` 只在构建期生效，**不会写进最终镜像的运行时环境**；
+> 但它的值会出现在 `docker history` 里，所以代理地址**别带用户名密码**。
+
+#### 2.5.3 方式 B：`~/.docker/config.json` 的 `proxies`（一劳永逸）
+
+不想每次敲环境变量，或者机器上有多个项目要构建，就配这个。**它连 `ARG` 都不用声明**，
+Docker 会自动注入到所有构建中：
+
+```bash
+mkdir -p ~/.docker
+cat > ~/.docker/config.json <<'EOF'
+{
+  "proxies": {
+    "default": {
+      "httpProxy": "http://192.168.31.158:7890",
+      "httpsProxy": "http://192.168.31.158:7890",
+      "noProxy": "localhost,127.0.0.1"
+    }
+  }
+}
+EOF
+```
+
+配好后 `docker compose up -d --build` 即可，无需任何前缀。
+
+> 注意：它同时会给**运行中的容器**注入这些代理环境变量。对本项目无影响
+> （应用运行时不访问外网），但如果宿主机的代理哪天挂了，容器里仍留着这些变量。
+
+#### 2.5.4 拉基础镜像失败（与上面是两件事）
+
+`docker pull` / 构建时拉 `node:22-alpine` 是由 **dockerd 守护进程**发起的，
+上面两种方式**都管不到它**。若报：
+
+```
+failed to resolve source metadata for docker.io/library/node:22-alpine
+```
+
+二选一：
+
+```bash
+# ① 用国内加速源手动拉下来再打本地标签（不需要 root）
+docker pull docker.m.daocloud.io/library/node:22-alpine
+docker tag  docker.m.daocloud.io/library/node:22-alpine node:22-alpine
+docker compose up -d --build
+```
+
+```bash
+# ② 给守护进程配镜像加速器（需要 root 并重启 dockerd）
+sudo tee /etc/docker/daemon.json >/dev/null <<'EOF'
+{ "registry-mirrors": ["https://docker.m.daocloud.io"] }
+EOF
+sudo systemctl restart docker
+```
+
+> 守护进程走代理则需要在 systemd drop-in 里配 `HTTP_PROXY`（`/etc/systemd/system/docker.service.d/`），
+> 同样需要 root，属于宿主机运维范畴。
 
 ### 2.6 ⚠️ 换端口时注意浏览器的「不安全端口」
 

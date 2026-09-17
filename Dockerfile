@@ -13,9 +13,17 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
+# ---- 构建期代理 ----
+# 仅用于 npm ci 联网；ARG 不会写进最终镜像的运行时环境。
+# 注意：BuildKit 不会自动读取 docker compose 命令前的 HTTP_PROXY=...，必须像下面这样声明 ARG，
+#      再由 docker-compose.yml 的 build.args 传入（详见 README 2.5）。
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+
 # 先装依赖，利用构建缓存
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
+RUN npm ci --omit=dev --no-audit --no-fund --fetch-retries=5 && npm cache clean --force
 
 # 再拷源码（LICENSE 一并带入镜像，满足 MIT 的版权声明保留要求）
 COPY src ./src
