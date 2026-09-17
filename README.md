@@ -88,7 +88,7 @@ DATA_DIR=./data PORT=8686 npm start
 
 ```bash
 # ❌ 在 BuildKit 下无效
-HTTP_PROXY=http://192.168.31.158:7890 HTTPS_PROXY=http://192.168.31.158:7890 \
+HTTP_PROXY=http://192.168.1.100:7890 HTTPS_PROXY=http://192.168.1.100:7890 \
   docker compose up -d --build
 ```
 
@@ -102,8 +102,8 @@ BuildKit 下代理必须**显式**传递。本仓库已经配好了 **方式 A**
 `docker-compose.yml` 里把它们接到宿主机环境变量上，所以下面这条命令**现在可以直接用了**：
 
 ```bash
-HTTP_PROXY=http://192.168.31.158:7890 \
-HTTPS_PROXY=http://192.168.31.158:7890 \
+HTTP_PROXY=http://192.168.1.100:7890 \
+HTTPS_PROXY=http://192.168.1.100:7890 \
 docker compose up -d --build
 ```
 
@@ -128,8 +128,8 @@ cat > ~/.docker/config.json <<'EOF'
 {
   "proxies": {
     "default": {
-      "httpProxy": "http://192.168.31.158:7890",
-      "httpsProxy": "http://192.168.31.158:7890",
+      "httpProxy": "http://192.168.1.100:7890",
+      "httpsProxy": "http://192.168.1.100:7890",
       "noProxy": "localhost,127.0.0.1"
     }
   }
@@ -210,17 +210,24 @@ Chromium 系浏览器（Chrome / Edge，也就是 A 端与 B 端使用的内核�
 它不会挂起策略：
 
 ```bash
-sg docker -c 'docker compose restart'   # 重启应用（保留策略）
-sg docker -c 'docker compose up -d'     # 修改配置后重新应用
+docker compose restart   # 重启应用（保留策略）
+docker compose up -d     # 修改配置后重新应用
 ```
+
+> 若提示 `permission denied while trying to connect to the Docker daemon socket`，
+> 说明当前用户不在 `docker` 组，执行下面这条后**重新登录**（或 `newgrp docker`）即可：
+>
+> ```bash
+> sudo usermod -aG docker $USER
+> ```
 
 #### 验证自动恢复
 
 ```bash
 # 模拟真实崩溃（容器内部杀掉进程，而不是 docker kill）
-sg docker -c 'docker exec 101rtnotice sh -c "kill -9 \$(pgrep -f \"node src/server.js\")"'
+docker exec 101rtnotice sh -c "kill -9 \$(pgrep -f 'node src/server.js')"
 sleep 8
-sg docker -c 'docker inspect 101rtnotice --format "状态: {{.State.Status}}  重启次数: {{.RestartCount}}"'
+docker inspect 101rtnotice --format '状态: {{.State.Status}}  重启次数: {{.RestartCount}}'
 # 预期输出：状态: running  重启次数: 1
 curl -s http://127.0.0.1:8686/api/health
 ```
@@ -506,7 +513,7 @@ PRD 未明确、实现时做了取舍，列在这里便于复核：
 ## 11. 不在本需求范围
 
 - 部署方式、隧道 / 穿透与网络加速方案；
-- HTTPS 证书与反向代理（容器只暴露 `8686`，按你既有的通道配置转发到 `101RTnotice.myncdw.top`）；
+- HTTPS 证书与反向代理（容器只暴露 `8686`，由你自己的域名 / 隧道方案转发到该端口）；
 - 埋点、统计与监控。
 
 ---
