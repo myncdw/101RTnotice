@@ -16,8 +16,8 @@ module.exports = {
   publicDir: path.join(ROOT, 'public'),
 
   // ---------- 房间 ----------
-  /** 房间号长度：8 位 */
-  roomIdLength: 8,
+  /** 房间号长度 */
+  roomIdLength: 4,
   /** 房间号字符集：字母 + 数字 */
   roomIdAlphabet: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
   /** 连续 24 小时无 A 端轮询即回收房间 */

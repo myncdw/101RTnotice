@@ -45,6 +45,20 @@ function isValidRoomId(roomId) {
   return typeof roomId === 'string' && ROOM_ID_RE.test(roomId);
 }
 
+/** 房间号规范化：去空格 + 转大写；格式非法返回 null */
+function normalizeRoomId(value) {
+  if (typeof value !== 'string') return null;
+  const v = value.trim().toUpperCase();
+  return isValidRoomId(v) ? v : null;
+}
+
+/** 带错误码的业务异常，便于接口层映射为不同的 HTTP 状态 */
+function roomError(code, message) {
+  const err = new Error(message);
+  err.code = code;
+  return err;
+}
+
 function normalizeTime(value) {
   if (value === null || value === undefined) return null;
   if (typeof value !== 'string') return null;
@@ -197,11 +211,16 @@ async function init() {
   await fsp.mkdir(roomsRoot, { recursive: true });
   const entries = await fsp.readdir(roomsRoot, { withFileTypes: true });
   let loaded = 0;
+  const skipped = [];
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const roomId = entry.name;
-    if (!isValidRoomId(roomId)) continue;
+    if (!isValidRoomId(roomId)) {
+      // 常见于房间号长度改版后残留的旧目录：只忽略，不删除
+      skipped.push(roomId);
+      continue;
+    }
     try {
       const meta = await readJson(metaFile(roomId));
       const message = await readJson(messageFile(roomId));
@@ -215,19 +234,46 @@ async function init() {
   }
 
   console.log(`[store] 数据目录 ${roomsRoot}，已恢复 ${loaded} 个房间`);
+  if (skipped.length) {
+    const head = skipped.slice(0, 10).join(', ');
+    console.warn(
+      `[store] 忽略 ${skipped.length} 个不符合房间号规则的目录（未删除）：${head}${skipped.length > 10 ? ' …' : ''}`
+    );
+  }
   return [...rooms.values()];
 }
 
-async function createRoom() {
-  let roomId = null;
-  for (let i = 0; i < 16; i += 1) {
-    const candidate = newRoomId();
-    if (!rooms.has(candidate) && !fs.existsSync(roomDir(candidate))) {
-      roomId = candidate;
-      break;
+/**
+ * 创建房间。
+ * @param {string|null} [customRoomId] 自定义房间号；留空则随机生成。
+ *   已被占用或格式非法时抛出带 code 的异常（ROOM_EXISTS / INVALID_ROOM_ID），
+ *   两种情况返回的错误文案一致，避免被用来探测某个房间号是否存在。
+ */
+async function createRoom(customRoomId) {
+  const hasCustom =
+    customRoomId !== undefined && customRoomId !== null && String(customRoomId).trim() !== '';
+
+  let roomId;
+
+  if (hasCustom) {
+    roomId = normalizeRoomId(customRoomId);
+    if (!roomId) {
+      throw roomError('INVALID_ROOM_ID', `房间号应为 ${config.roomIdLength} 位字母或数字`);
     }
+    if (rooms.has(roomId) || fs.existsSync(roomDir(roomId))) {
+      throw roomError('ROOM_EXISTS', '房间号已被占用，请换一个');
+    }
+  } else {
+    roomId = null;
+    for (let i = 0; i < 32; i += 1) {
+      const candidate = newRoomId();
+      if (!rooms.has(candidate) && !fs.existsSync(roomDir(candidate))) {
+        roomId = candidate;
+        break;
+      }
+    }
+    if (!roomId) throw new Error('无法生成唯一房间号');
   }
-  if (!roomId) throw new Error('无法生成唯一房间号');
 
   const now = Date.now();
   const room = {
@@ -319,6 +365,8 @@ module.exports = {
   persist,
   shutdown,
   isValidRoomId,
+  normalizeRoomId,
+  roomError,
   normHex,
   normalizeTime,
   TIME_RE,

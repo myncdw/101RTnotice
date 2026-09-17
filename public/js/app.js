@@ -21,6 +21,11 @@
 
   const DEFAULT_SETTINGS = { fontSize: DEFAULT_FONT_SIZE, nightStart: '20:00', nightEnd: '06:00' };
 
+  /** 房间号：与 src/config.js 的 roomIdLength / roomIdAlphabet 保持一致 */
+  const ROOM_ID_LENGTH = 4;
+  const ROOM_ID_RE = new RegExp(`^[A-Z0-9]{${ROOM_ID_LENGTH}}$`);
+  const ROOM_ID_HINT = `房间号应为 ${ROOM_ID_LENGTH} 位字母或数字`;
+
   const state = {
     roomId: null,
     role: null,          // 'view' | 'edit' | null
@@ -79,7 +84,7 @@
   });
 
   const API = {
-    createRoom: () => request('/api/rooms', jsonInit('POST', {})),
+    createRoom: (roomId) => request('/api/rooms', jsonInit('POST', { roomId: roomId || null })),
     checkRoom: (roomId) => request(`/api/rooms/${encodeURIComponent(roomId)}`),
     getState: (roomId, role) => request(`/api/rooms/${encodeURIComponent(roomId)}/state?role=${role}`),
     push: (roomId, payload) => request(`/api/rooms/${encodeURIComponent(roomId)}/messages`, jsonInit('POST', payload)),
@@ -207,7 +212,7 @@
     exitFullscreen();
 
     show($('appShell'));
-    $('roomBadge').textContent = state.roomId || '--------';
+    $('roomBadge').textContent = state.roomId || '----';
     $('roleBadge').textContent = state.role === 'view' ? '查看端' : state.role === 'edit' ? '编辑端' : '';
 
     if (screen === 'identity') {
@@ -274,12 +279,15 @@
     state.pendingRoomId = null;
 
     // 重置入口弹窗
-    $('roomDisplay').textContent = '--------';
+    $('roomDisplay').textContent = '----';
+    $('customRoomInput').value = '';
     $('btnCopyRoom').disabled = true;
     $('btnCreateEnter').disabled = true;
     $('btnCreate').disabled = false;
+    $('btnCreate').textContent = '创建房间';
     $('joinInput').value = '';
     hide($('joinError'));
+    hide($('createError'));
     hide($('dialogModal'));
     switchTab('create');
     show($('entryModal'));
@@ -395,20 +403,35 @@
 
   $('btnCreate').addEventListener('click', async () => {
     const btn = $('btnCreate');
+    const errEl = $('createError');
+    hide(errEl);
+
+    const custom = ($('customRoomInput').value || '').trim().toUpperCase();
+    if (custom && !ROOM_ID_RE.test(custom)) {
+      errEl.textContent = ROOM_ID_HINT;
+      show(errEl);
+      return;
+    }
+
     btn.disabled = true;
-    btn.textContent = '生成中…';
+    btn.textContent = '创建中…';
     try {
-      const payload = await API.createRoom();
+      const payload = await API.createRoom(custom);
       state.pendingRoomId = payload.roomId;
       $('roomDisplay').textContent = payload.roomId;
       $('btnCopyRoom').disabled = false;
       $('btnCreateEnter').disabled = false;
-      RTN.toast('房间号已生成，请复制给另一台设备');
+      RTN.toast(custom ? '自定义房间号创建成功' : '房间号已生成，请复制给另一台设备');
     } catch (err) {
-      RTN.toast('创建失败，请稍后重试');
+      if (err.code === 'ROOM_EXISTS' || err.code === 'INVALID_ROOM_ID') {
+        errEl.textContent = err.message || ROOM_ID_HINT;
+      } else {
+        errEl.textContent = '创建失败，请稍后重试';
+      }
+      show(errEl);
     } finally {
       btn.disabled = false;
-      btn.textContent = '重新生成';
+      btn.textContent = '创建房间';
     }
   });
 
@@ -435,8 +458,8 @@
     hide(errEl);
     const roomId = ($('joinInput').value || '').trim().toUpperCase();
 
-    if (!/^[A-Z0-9]{8}$/.test(roomId)) {
-      errEl.textContent = '房间号应为 8 位字母或数字';
+    if (!ROOM_ID_RE.test(roomId)) {
+      errEl.textContent = ROOM_ID_HINT;
       show(errEl);
       return;
     }
@@ -459,6 +482,19 @@
   $('joinInput').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter') $('btnJoin').click();
   });
+
+  $('customRoomInput').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') $('btnCreate').click();
+  });
+
+  // 只保留字母与数字，自动转大写
+  for (const id of ['customRoomInput', 'joinInput']) {
+    $(id).addEventListener('input', () => {
+      const el = $(id);
+      const cleaned = (el.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, ROOM_ID_LENGTH);
+      if (cleaned !== el.value) el.value = cleaned;
+    });
+  }
 
   // ================================================================
   // 身份 / 导航

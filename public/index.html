@@ -23,7 +23,7 @@
   <div id="appShell" class="app-shell is-hidden">
     <header class="topbar">
       <div class="topbar-left">
-        <span class="room-badge" id="roomBadge">--------</span>
+        <span class="room-badge" id="roomBadge">----</span>
         <span class="role-badge" id="roleBadge"></span>
       </div>
       <div class="topbar-right">
@@ -132,20 +132,24 @@
       </div>
 
       <div id="createPane" class="pane">
-        <p class="panel-hint">由系统随机生成 8 位房间号，复制给另一台设备即可加入。</p>
-        <div class="room-display" id="roomDisplay">--------</div>
-        <button id="btnCreate" class="primary-btn" type="button">生成房间号</button>
+        <p class="panel-hint">留空则由系统随机生成 4 位房间号；也可以填一个好记的自定义房间号。</p>
+        <input id="customRoomInput" class="input room-input" type="text" maxlength="4"
+               autocomplete="off" autocapitalize="characters" spellcheck="false"
+               placeholder="自定义（留空则随机）" />
+        <button id="btnCreate" class="primary-btn" type="button">创建房间</button>
+        <div class="room-display" id="roomDisplay">----</div>
         <div class="row">
           <button id="btnCopyRoom" class="ghost-btn" type="button" disabled>复制房间号</button>
           <button id="btnCreateEnter" class="primary-btn" type="button" disabled>进入房间</button>
         </div>
+        <p class="error-text is-hidden" id="createError"></p>
       </div>
 
       <div id="joinPane" class="pane is-hidden">
-        <p class="panel-hint">输入 8 位房间号（字母 + 数字，不区分大小写）。</p>
-        <input id="joinInput" class="input room-input" type="text" maxlength="8"
+        <p class="panel-hint">输入 4 位房间号（字母 + 数字，不区分大小写）。</p>
+        <input id="joinInput" class="input room-input" type="text" maxlength="4"
                autocomplete="off" autocapitalize="characters" spellcheck="false"
-               placeholder="XXXXXXXX" />
+               placeholder="XXXX" />
         <button id="btnJoin" class="primary-btn" type="button">加入房间</button>
         <p class="error-text is-hidden" id="joinError"></p>
       </div>

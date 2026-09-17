@@ -69,11 +69,19 @@ app.get('/api/health', (req, res) => {
 
 app.post('/api/rooms', async (req, res, next) => {
   try {
-    const room = await store.createRoom();
-    console.log(`[room] 创建房间 ${room.roomId}`);
+    const body = req.body || {};
+    // roomId 留空 => 随机生成；填了则作为自定义房间号
+    const room = await store.createRoom(body.roomId);
+    console.log(`[room] 创建房间 ${room.roomId}${body.roomId ? '（自定义）' : ''}`);
     res.status(201).json({ ok: true, roomId: room.roomId, serverTime: Date.now() });
   } catch (err) {
-    next(err);
+    if (err.code === 'INVALID_ROOM_ID') {
+      return res.status(400).json({ ok: false, error: err.code, message: err.message });
+    }
+    if (err.code === 'ROOM_EXISTS') {
+      return res.status(409).json({ ok: false, error: err.code, message: err.message });
+    }
+    return next(err);
   }
 });
 
