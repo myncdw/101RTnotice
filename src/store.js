@@ -76,6 +76,31 @@ function normHex(value, fallback) {
   return v.toLowerCase();
 }
 
+/** base64url 盐值与校验密文 */
+const SALT_RE = /^[A-Za-z0-9_-]{16,64}$/;
+const CHECK_RE = /^[A-Za-z0-9_.-]{8,512}$/;
+
+/**
+ * 规整加密参数。
+ * 服务器只保存「盐 + 迭代次数 + 一段校验密文」，密码与密钥永远不落服务端。
+ * @returns {{enc: object|null, invalid: boolean}}
+ */
+function normalizeEnc(raw) {
+  if (raw === null || raw === undefined) return { enc: null, invalid: false };
+  if (typeof raw !== 'object') return { enc: null, invalid: true };
+
+  const salt = typeof raw.salt === 'string' ? raw.salt.trim() : '';
+  const check = typeof raw.check === 'string' ? raw.check.trim() : '';
+  const iter = Number(raw.iter);
+
+  if (!SALT_RE.test(salt)) return { enc: null, invalid: true };
+  if (!CHECK_RE.test(check)) return { enc: null, invalid: true };
+  if (!Number.isInteger(iter) || iter < 10000 || iter > 2000000) {
+    return { enc: null, invalid: true };
+  }
+  return { enc: { v: 1, salt, iter, check }, invalid: false };
+}
+
 function defaultSettings() {
   return {
     fontSize: config.defaultFontSize,
@@ -123,8 +148,12 @@ async function readJson(file) {
 function normalizeMessage(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const expiresAt = Number(raw.expiresAt);
+  const enc = raw.enc === true;
+  // 加密消息的 text 是密文信封，用更宽的上限
+  const limit = enc ? config.maxEncryptedTextLength : config.maxTextLength;
   return {
-    text: typeof raw.text === 'string' ? raw.text.slice(0, config.maxTextLength) : '',
+    text: typeof raw.text === 'string' ? raw.text.slice(0, limit) : '',
+    enc,
     bg: normHex(raw.bg, '#ffffff'),
     fg: normHex(raw.fg, '#000000'),
     expiresAt: Number.isFinite(expiresAt) && expiresAt > 0 ? expiresAt : null,
@@ -156,6 +185,7 @@ function normalizeRoom(raw, roomId) {
       nightStart: normalizeTime(s.nightStart),
       nightEnd: normalizeTime(s.nightEnd),
     },
+    enc: normalizeEnc(r.enc).enc,
     message: normalizeMessage(r.message),
   };
 }
@@ -167,6 +197,7 @@ function toMetaPayload(room) {
     lastSeenA: room.lastSeenA,
     lastPushAt: room.lastPushAt,
     settings: room.settings,
+    enc: room.enc || null,
   };
 }
 
@@ -248,8 +279,9 @@ async function init() {
  * @param {string|null} [customRoomId] 自定义房间号；留空则随机生成。
  *   已被占用或格式非法时抛出带 code 的异常（ROOM_EXISTS / INVALID_ROOM_ID），
  *   两种情况返回的错误文案一致，避免被用来探测某个房间号是否存在。
+ * @param {object|null} [enc] 客户端的加密参数 { salt, iter, check }；null 表示不加密。
  */
-async function createRoom(customRoomId) {
+async function createRoom(customRoomId, enc) {
   const hasCustom =
     customRoomId !== undefined && customRoomId !== null && String(customRoomId).trim() !== '';
 
@@ -282,6 +314,7 @@ async function createRoom(customRoomId) {
     lastSeenA: now,
     lastPushAt: 0,
     settings: defaultSettings(),
+    enc: enc || null,
     message: null,
   };
   rooms.set(roomId, room);
@@ -319,6 +352,7 @@ async function destroyMessage(roomId) {
 
   room.message = {
     text: ' ',
+    enc: false,
     bg: '#ffffff',
     fg: '#000000',
     expiresAt: null,
@@ -366,6 +400,7 @@ module.exports = {
   shutdown,
   isValidRoomId,
   normalizeRoomId,
+  normalizeEnc,
   roomError,
   normHex,
   normalizeTime,

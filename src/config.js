@@ -26,8 +26,10 @@ module.exports = {
   sweepIntervalMs: 60 * 1000,
 
   // ---------- 消息 ----------
-  /** 文本上限 100 字 */
+  /** 明文文本上限 100 字（客户端强制） */
   maxTextLength: 100,
+  /** 密文上限：100 字明文经 AES-GCM + base64 后约 700 字符，留足余量 */
+  maxEncryptedTextLength: 2000,
   /** 服务器丢弃距上一条消息 3 秒内提交的新消息 */
   discardWindowMs: 3000,
 

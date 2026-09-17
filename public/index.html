@@ -98,6 +98,7 @@
       <section id="settingsPanel" class="panel is-hidden">
         <h1 class="panel-title">房间设置</h1>
         <p class="panel-hint">设置为房间级共享，保存后对房间内所有设备（含 A 端）生效。</p>
+        <p class="panel-hint">通知加密：<strong id="encInfo">未开启</strong></p>
 
         <label class="field">
           <span class="field-label">字体大小（≥ 24，默认 42）</span>
@@ -132,12 +133,25 @@
       </div>
 
       <div id="createPane" class="pane">
-        <p class="panel-hint">留空则由系统随机生成 4 位房间号；也可以填一个好记的自定义房间号。</p>
+        <p class="panel-hint">房间号为 4 位字母或数字，可自填，也可点「随机房间号」生成。</p>
         <input id="customRoomInput" class="input room-input" type="text" maxlength="4"
                autocomplete="off" autocapitalize="characters" spellcheck="false"
-               placeholder="自定义（留空则随机）" />
-        <button id="btnCreate" class="primary-btn" type="button">创建房间</button>
-        <div class="room-display" id="roomDisplay">----</div>
+               placeholder="房间号" />
+        <div class="row">
+          <button id="btnRandomRoom" class="ghost-btn" type="button">随机房间号</button>
+          <button id="btnCreate" class="primary-btn" type="button">创建房间</button>
+        </div>
+
+        <label class="field">
+          <span class="field-label">
+            设置密码（可选）
+            <span class="counter">用于加密通知</span>
+          </span>
+          <input id="createPassword" class="input" type="password"
+                 autocomplete="new-password" spellcheck="false"
+                 placeholder="留空则不加密，至少 6 位" />
+        </label>
+
         <div class="row">
           <button id="btnCopyRoom" class="ghost-btn" type="button" disabled>复制房间号</button>
           <button id="btnCreateEnter" class="primary-btn" type="button" disabled>进入房间</button>
@@ -150,6 +164,15 @@
         <input id="joinInput" class="input room-input" type="text" maxlength="4"
                autocomplete="off" autocapitalize="characters" spellcheck="false"
                placeholder="XXXX" />
+        <label class="field">
+          <span class="field-label">
+            房间密码
+            <span class="counter">加密房间才需要填</span>
+          </span>
+          <input id="joinPassword" class="input" type="password"
+                 autocomplete="current-password" spellcheck="false"
+                 placeholder="未加密的房间请留空" />
+        </label>
         <button id="btnJoin" class="primary-btn" type="button">加入房间</button>
         <p class="error-text is-hidden" id="joinError"></p>
       </div>
@@ -171,6 +194,7 @@
   <div id="toast" class="toast is-hidden"></div>
 
   <script src="./js/core.js"></script>
+  <script src="./js/crypto.js"></script>
   <script src="./js/audio.js"></script>
   <script src="./js/theme.js"></script>
   <script src="./js/renderer.js"></script>

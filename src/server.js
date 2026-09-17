@@ -42,6 +42,7 @@ function publicMessage(message) {
   if (!message) return null;
   return {
     text: message.text,
+    enc: message.enc === true,
     bg: message.bg,
     fg: message.fg,
     expiresAt: message.expiresAt,
@@ -55,6 +56,9 @@ function publicRoom(room) {
     serverTime: Date.now(),
     roomId: room.roomId,
     settings: room.settings,
+    // 加密参数（盐 + 迭代次数 + 校验密文）。
+    // 客户端用它本地校验密码并派生密钥；服务端不持有密码，无法解密任何通知。
+    enc: room.enc || null,
     message: publicMessage(room.message),
   };
 }
@@ -70,10 +74,17 @@ app.get('/api/health', (req, res) => {
 app.post('/api/rooms', async (req, res, next) => {
   try {
     const body = req.body || {};
+
+    // enc 由客户端生成（盐 / 迭代次数 / 校验密文），密码本身不会上传
+    const { enc, invalid } = store.normalizeEnc(body.enc);
+    if (invalid) {
+      return res.status(400).json({ ok: false, error: 'INVALID_ENC', message: '加密参数格式不正确' });
+    }
+
     // roomId 留空 => 随机生成；填了则作为自定义房间号
-    const room = await store.createRoom(body.roomId);
-    console.log(`[room] 创建房间 ${room.roomId}${body.roomId ? '（自定义）' : ''}`);
-    res.status(201).json({ ok: true, roomId: room.roomId, serverTime: Date.now() });
+    const room = await store.createRoom(body.roomId, enc);
+    console.log(`[room] 创建房间 ${room.roomId}（${body.roomId ? '自定义' : '随机'}${enc ? '，已加密' : ''}）`);
+    return res.status(201).json({ ok: true, roomId: room.roomId, serverTime: Date.now() });
   } catch (err) {
     if (err.code === 'INVALID_ROOM_ID') {
       return res.status(400).json({ ok: false, error: err.code, message: err.message });
@@ -102,9 +113,14 @@ app.use('/api/rooms/:roomId', (req, res, next) => {
   return next();
 });
 
-/** 加入房间前的存在性校验 */
+/** 加入房间前的存在性校验（加密房间需要拿回 enc 才能本地验密码） */
 app.get('/api/rooms/:roomId', (req, res) => {
-  res.json({ ok: true, roomId: req.roomId, serverTime: Date.now() });
+  res.json({
+    ok: true,
+    roomId: req.roomId,
+    enc: req.room.enc || null,
+    serverTime: Date.now(),
+  });
 });
 
 /**
@@ -132,11 +148,27 @@ app.post('/api/rooms/:roomId/messages', async (req, res, next) => {
 
     const body = req.body || {};
     const text = typeof body.text === 'string' ? body.text : '';
-    if (text.length > config.maxTextLength) {
+    const wantsEnc = body.enc === true;
+
+    // 加密房间只能收密文，未加密房间只能收明文：
+    // 否则任何人猜到房间号后都能向加密房间注入一段明文，直接在 A 端显示出来。
+    if (!!room.enc !== wantsEnc) {
+      return res.status(400).json({
+        ok: false,
+        error: room.enc ? 'ROOM_ENCRYPTED' : 'ROOM_NOT_ENCRYPTED',
+        message: room.enc
+          ? '该房间已开启加密，只能推送加密内容'
+          : '该房间未开启加密，不能推送加密内容',
+      });
+    }
+
+    // 加密房间的密文长度由客户端保证（服务端看不到明文，无法校验 100 字上限）
+    const maxLen = room.enc ? config.maxEncryptedTextLength : config.maxTextLength;
+    if (text.length > maxLen) {
       return res.status(400).json({
         ok: false,
         error: 'TEXT_TOO_LONG',
-        message: `文本不得超过 ${config.maxTextLength} 字`,
+        message: room.enc ? '加密内容过长' : `文本不得超过 ${config.maxTextLength} 字`,
       });
     }
 
@@ -148,6 +180,7 @@ app.post('/api/rooms/:roomId/messages', async (req, res, next) => {
     // 每次推送整条覆盖：文本、背景色、字体色、存活期全部以新消息为准
     room.message = {
       text,
+      enc: wantsEnc,
       bg: store.normHex(body.bg, '#ffffff'),
       fg: store.normHex(body.fg, '#000000'),
       expiresAt,
@@ -159,7 +192,9 @@ app.post('/api/rooms/:roomId/messages', async (req, res, next) => {
     await store.persist(room);
     expiry.schedule(room);
 
-    console.log(`[push] 房间 ${room.roomId} 更新消息（${text.length} 字，存活期 ${expiresAt ? new Date(expiresAt).toISOString() : '永久'}）`);
+    console.log(
+      `[push] 房间 ${room.roomId} 更新消息（${wantsEnc ? '加密' : `${text.length} 字`}，存活期 ${expiresAt ? new Date(expiresAt).toISOString() : '永久'}）`
+    );
     return res.json({ ok: true, serverTime: now, message: publicMessage(room.message) });
   } catch (err) {
     return next(err);

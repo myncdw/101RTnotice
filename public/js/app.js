@@ -26,12 +26,19 @@
   const ROOM_ID_RE = new RegExp(`^[A-Z0-9]{${ROOM_ID_LENGTH}}$`);
   const ROOM_ID_HINT = `房间号应为 ${ROOM_ID_LENGTH} 位字母或数字`;
 
+  /** 密码长度下限（服务端不做强度校验，仅客户端约束） */
+  const MIN_PASSWORD_LENGTH = 6;
+
   const state = {
     roomId: null,
     role: null,          // 'view' | 'edit' | null
     screen: null,        // 'identity' | 'edit' | 'settings' | 'view'
     settings: { ...DEFAULT_SETTINGS },
     message: null,
+    /** 房间的加密参数 { v, salt, iter, check }，未加密为 null */
+    enc: null,
+    /** 当前房间的密码（存于 localStorage，A 端无人值守自动解密依赖它） */
+    password: null,
     lastText: null,
     firstLoadDone: false,
     pollTimer: 0,
@@ -39,6 +46,7 @@
     pushBusy: false,
     lastPushClickAt: 0,
     pendingRoomId: null,
+    pendingPassword: null,
   };
 
   let wakeLock = null;
@@ -84,7 +92,8 @@
   });
 
   const API = {
-    createRoom: (roomId) => request('/api/rooms', jsonInit('POST', { roomId: roomId || null })),
+    createRoom: (roomId, enc) =>
+      request('/api/rooms', jsonInit('POST', { roomId: roomId || null, enc: enc || null })),
     checkRoom: (roomId) => request(`/api/rooms/${encodeURIComponent(roomId)}`),
     getState: (roomId, role) => request(`/api/rooms/${encodeURIComponent(roomId)}/state?role=${role}`),
     push: (roomId, payload) => request(`/api/rooms/${encodeURIComponent(roomId)}/messages`, jsonInit('POST', payload)),
@@ -108,7 +117,7 @@
       const startedAt = Date.now();
       try {
         const payload = await API.getState(state.roomId, role);
-        onState(payload, role);
+        await onState(payload, role);
       } catch (err) {
         if (err.code === 'ROOM_NOT_FOUND') {
           handleRoomGone();
@@ -124,17 +133,25 @@
     state.pollTimer = setTimeout(loop, immediate ? 0 : intervalMs);
   }
 
-  function onState(payload, role) {
+  async function onState(payload, role) {
     const previousSettings = JSON.stringify(state.settings);
     if (payload.settings) state.settings = payload.settings;
+    if (payload.enc !== undefined) state.enc = payload.enc || null;
     state.message = payload.message || null;
 
     if (role === 'A') {
-      const text = state.message ? state.message.text : '';
-      const changed = text !== state.lastText;
       const night = RTN.theme.isNight(state.settings);
 
-      applyMessageToView(text, night);
+      // 解密失败（密码不对 / 密文被篡改）：保留当前画面，不清屏
+      const text = await resolvePlainText(state.message);
+      if (text === null) {
+        RTN.theme.applyShellTheme(night);
+        console.warn('[rtn] 通知解密失败，已保留当前画面');
+        return;
+      }
+
+      const changed = text !== state.lastText;
+      await applyMessageToView(text);
 
       // 提示音：仅当内容非空、与上次不同、非夜间、且不是首屏加载时播放
       if (state.firstLoadDone && changed && text.trim() !== '' && !night) {
@@ -147,9 +164,11 @@
 
     // B 端：同步界面主题
     RTN.theme.applyShellTheme(RTN.theme.isNight(state.settings));
-    if (state.screen === 'settings' && JSON.stringify(state.settings) !== previousSettings) {
+    if (state.screen === 'settings') {
       fillSettingsForm();
-      RTN.toast('房间设置已被其他设备更新');
+      if (JSON.stringify(state.settings) !== previousSettings) {
+        RTN.toast('房间设置已被其他设备更新');
+      }
     }
   }
 
@@ -157,11 +176,26 @@
   // A 端渲染
   // ================================================================
 
-  function applyMessageToView(textOverride, nightOverride) {
-    const night = typeof nightOverride === 'boolean' ? nightOverride : RTN.theme.isNight(state.settings);
-    const msg = state.message;
+  /**
+   * 把当前消息解析为可显示的明文。
+   * @returns {Promise<string|null>} null 表示加密消息解密失败
+   */
+  async function resolvePlainText(message) {
+    if (!message) return '';
+    if (!message.enc) return message.text; // 明文（含销毁用的空格消息）
+    if (!state.enc || !state.password) return null;
+    return RTN.crypto.decryptText(state.roomId, state.password, state.enc, message.text);
+  }
 
-    let text = typeof textOverride === 'string' ? textOverride : (msg ? msg.text : '');
+  async function applyMessageToView(plainOverride) {
+    const night = RTN.theme.isNight(state.settings);
+    RTN.theme.applyShellTheme(night);
+
+    const text =
+      typeof plainOverride === 'string' ? plainOverride : await resolvePlainText(state.message);
+    if (text === null) return; // 解密失败，保持画面不动
+
+    const msg = state.message;
     let bg = msg ? msg.bg : '#ffffff';
     let fg = msg ? msg.fg : '#000000';
 
@@ -171,7 +205,6 @@
       fg = '#ffffff';
     }
 
-    RTN.theme.applyShellTheme(night);
     RTN.renderer.render({
       text,
       bg,
@@ -237,10 +270,12 @@
 
   function setRole(role) {
     state.role = role;
-    RTN.session.set({ roomId: state.roomId, role });
+    // 注意：这里必须带上 password，否则切换身份会把已记住的密码冲掉，
+    // A 端重载后就再也解不开加密通知了
+    RTN.session.set({ roomId: state.roomId, role, password: state.password });
     if (role === 'view') {
       // 首屏（含切回查看）只显示内容，不播放提示音
-      state.lastText = state.message ? state.message.text : null;
+      state.lastText = null;
       state.firstLoadDone = false;
       goTo('view');
       return;
@@ -273,19 +308,24 @@
     state.roomId = null;
     state.role = null;
     state.message = null;
+    state.enc = null;
+    state.password = null;
     state.lastText = null;
     state.firstLoadDone = false;
     state.pushBusy = false;
     state.pendingRoomId = null;
+    state.pendingPassword = null;
 
     // 重置入口弹窗
-    $('roomDisplay').textContent = '----';
     $('customRoomInput').value = '';
+    $('createPassword').value = '';
+    $('joinPassword').value = '';
     $('btnCopyRoom').disabled = true;
     $('btnCreateEnter').disabled = true;
     $('btnCreate').disabled = false;
     $('btnCreate').textContent = '创建房间';
     $('joinInput').value = '';
+    $('joinPassword').value = '';
     hide($('joinError'));
     hide($('createError'));
     hide($('dialogModal'));
@@ -298,10 +338,13 @@
     show($('appShell'));
     $('roomBadge').textContent = state.roomId;
 
+    let loaded = false;
     try {
       const payload = await API.getState(state.roomId, role === 'view' ? 'A' : 'B');
       if (payload.settings) state.settings = payload.settings;
+      state.enc = payload.enc || null;
       state.message = payload.message || null;
+      loaded = true;
     } catch (err) {
       if (err.code === 'ROOM_NOT_FOUND') {
         handleRoomGone();
@@ -310,7 +353,25 @@
       RTN.toast('暂时无法连接服务器，将持续重试');
     }
 
-    state.lastText = state.message ? state.message.text : null;
+    // 房间需要密码但本地没有（例如换了设备、清了浏览器数据）
+    if (loaded && state.enc && !state.password) {
+      await RTN.alert('该房间已设置密码，需要输入密码才能查看通知', '提示');
+      showEntry();
+      return;
+    }
+
+    // 本地有密码时先验一次，避免密码不对却静默显示空白
+    if (loaded && state.enc && state.password) {
+      const ok = await RTN.crypto.verifyPassword(state.roomId, state.password, state.enc);
+      if (!ok) {
+        RTN.session.clear();
+        await RTN.alert('房间密码不正确，请重新输入', '提示');
+        showEntry();
+        return;
+      }
+    }
+
+    state.lastText = null;
     state.firstLoadDone = false;
     RTN.theme.applyShellTheme(RTN.theme.isNight(state.settings));
 
@@ -325,6 +386,7 @@
       return;
     }
     state.roomId = saved.roomId;
+    state.password = saved.password || null;
     await enterRoom(saved.role || null);
   }
 
@@ -401,14 +463,34 @@
   $('tabCreate').addEventListener('click', () => switchTab('create'));
   $('tabJoin').addEventListener('click', () => switchTab('join'));
 
+  $('btnRandomRoom').addEventListener('click', () => {
+    hide($('createError'));
+    $('customRoomInput').value = RTN.crypto.randomRoomId(ROOM_ID_LENGTH);
+    $('btnCopyRoom').disabled = true;
+    $('btnCreateEnter').disabled = true;
+    state.pendingRoomId = null;
+  });
+
   $('btnCreate').addEventListener('click', async () => {
     const btn = $('btnCreate');
     const errEl = $('createError');
     hide(errEl);
 
-    const custom = ($('customRoomInput').value || '').trim().toUpperCase();
-    if (custom && !ROOM_ID_RE.test(custom)) {
-      errEl.textContent = ROOM_ID_HINT;
+    const roomId = ($('customRoomInput').value || '').trim().toUpperCase();
+    if (!ROOM_ID_RE.test(roomId)) {
+      errEl.textContent = roomId ? ROOM_ID_HINT : '请先填写房间号，或点「随机房间号」';
+      show(errEl);
+      return;
+    }
+
+    const password = $('createPassword').value || '';
+    if (password && password.length < MIN_PASSWORD_LENGTH) {
+      errEl.textContent = `密码至少 ${MIN_PASSWORD_LENGTH} 位`;
+      show(errEl);
+      return;
+    }
+    if (password && !RTN.crypto.isSupported()) {
+      errEl.textContent = '当前浏览器不支持加密，请换用现代 Chromium 系浏览器';
       show(errEl);
       return;
     }
@@ -416,14 +498,16 @@
     btn.disabled = true;
     btn.textContent = '创建中…';
     try {
-      const payload = await API.createRoom(custom);
+      // 密码不发给服务端；只上传盐、迭代次数与校验密文
+      const enc = password ? await RTN.crypto.buildEncParams(roomId, password) : null;
+      const payload = await API.createRoom(roomId, enc);
       state.pendingRoomId = payload.roomId;
-      $('roomDisplay').textContent = payload.roomId;
+      state.pendingPassword = password || null;
       $('btnCopyRoom').disabled = false;
       $('btnCreateEnter').disabled = false;
-      RTN.toast(custom ? '自定义房间号创建成功' : '房间号已生成，请复制给另一台设备');
+      RTN.toast(password ? '加密房间已创建' : '房间已创建');
     } catch (err) {
-      if (err.code === 'ROOM_EXISTS' || err.code === 'INVALID_ROOM_ID') {
+      if (err.code === 'ROOM_EXISTS' || err.code === 'INVALID_ROOM_ID' || err.code === 'INVALID_ENC') {
         errEl.textContent = err.message || ROOM_ID_HINT;
       } else {
         errEl.textContent = '创建失败，请稍后重试';
@@ -436,8 +520,8 @@
   });
 
   $('btnCopyRoom').addEventListener('click', async () => {
-    const roomId = state.pendingRoomId;
-    if (!roomId) return;
+    const roomId = ($('customRoomInput').value || '').trim().toUpperCase();
+    if (!ROOM_ID_RE.test(roomId)) return;
     try {
       await navigator.clipboard.writeText(roomId);
       RTN.toast('房间号已复制');
@@ -449,7 +533,9 @@
   $('btnCreateEnter').addEventListener('click', () => {
     if (!state.pendingRoomId) return;
     state.roomId = state.pendingRoomId;
-    RTN.session.set({ roomId: state.roomId, role: null });
+    state.password = state.pendingPassword || null;
+    // 密码存入本地：A 端重载后才能继续自动解密
+    RTN.session.set({ roomId: state.roomId, role: null, password: state.password });
     enterRoom(null);
   });
 
@@ -467,9 +553,34 @@
     const btn = $('btnJoin');
     btn.disabled = true;
     try {
-      await API.checkRoom(roomId);
+      const info = await API.checkRoom(roomId);
+      let password = $('joinPassword').value || '';
+
+      if (info.enc) {
+        if (!password) {
+          errEl.textContent = '该房间已设置密码，请输入密码';
+          show(errEl);
+          return;
+        }
+        if (!RTN.crypto.isSupported()) {
+          errEl.textContent = '当前浏览器不支持解密，请换用现代 Chromium 系浏览器';
+          show(errEl);
+          return;
+        }
+        // 完全在本地校验，密码不会发给服务端
+        const ok = await RTN.crypto.verifyPassword(roomId, password, info.enc);
+        if (!ok) {
+          errEl.textContent = '密码错误';
+          show(errEl);
+          return;
+        }
+      } else {
+        password = null; // 未加密的房间忽略密码输入
+      }
+
       state.roomId = roomId;
-      RTN.session.set({ roomId, role: null });
+      state.password = password;
+      RTN.session.set({ roomId, role: null, password });
       enterRoom(null);
     } catch (err) {
       errEl.textContent = err.code === 'ROOM_NOT_FOUND' ? '房间不存在' : '连接失败，请重试';
@@ -665,9 +776,35 @@
     // 先 loading 5 秒再正式提交，用于避开服务器的 3 秒丢弃窗口
     await countdownLoading(btn, PUSH_LOADING_MS);
 
+    // 加密房间：在提交前把明文换成密文（密钥已缓存，耗时极短）
+    let payloadText = text;
+    let enc = false;
+    if (state.enc) {
+      if (!state.password || !RTN.crypto.isSupported()) {
+        hint.textContent = '本地缺少密码，无法加密，请重新加入房间。';
+        RTN.toast('缺少密码，无法加密');
+        state.pushBusy = false;
+        btn.disabled = false;
+        btn.textContent = '确认推送';
+        return;
+      }
+      try {
+        payloadText = await RTN.crypto.encryptText(state.roomId, state.password, state.enc, text);
+        enc = true;
+      } catch (err) {
+        hint.textContent = '加密失败，未提交。';
+        RTN.toast('加密失败');
+        state.pushBusy = false;
+        btn.disabled = false;
+        btn.textContent = '确认推送';
+        return;
+      }
+    }
+
     try {
       const result = await pushWithRetry({
-        text,
+        text: payloadText,
+        enc,
         bg,
         fg,
         expireAt: expireRaw || null,
@@ -676,7 +813,7 @@
         hint.textContent = '该消息距上一条不足 3 秒，已被服务器丢弃。';
         RTN.toast('消息已被服务器丢弃');
       } else {
-        hint.textContent = '推送成功。';
+        hint.textContent = enc ? '推送成功（已加密）。' : '推送成功。';
         RTN.toast('推送成功');
       }
     } catch (err) {
@@ -687,7 +824,7 @@
         handleRoomGone();
         return;
       }
-      hint.textContent = '推送失败。A 端内容保持不变。';
+      hint.textContent = `推送失败：${err.message || '请稍后重试'}`;
       RTN.toast('推送失败');
     } finally {
       state.pushBusy = false;
@@ -704,6 +841,7 @@
     $('setFontSize').value = String(state.settings.fontSize);
     $('setNightStart').value = state.settings.nightStart || '';
     $('setNightEnd').value = state.settings.nightEnd || '';
+    $('encInfo').textContent = state.enc ? '已开启（通知以密文存储）' : '未开启';
     hide($('settingsError'));
     $('settingsError').textContent = '';
     hide($('settingsSaved'));
