@@ -182,6 +182,56 @@ Chromium 系浏览器（Chrome / Edge，也就是 A 端与 B 端使用的内核�
 
 可安全使用：`8686`、`6688`、`8888`、`6060`、`7000`、`8080`、`9000`、`3333`。
 
+### 2.7 自动启动（已经配好了）
+
+`docker-compose.yml` 里已经写了 `restart: unless-stopped`，**不需要额外配置**。
+生效需要两个条件，缺一不可：
+
+| 条件 | 作用 | 怎么查 |
+|---|---|---|
+| 容器重启策略 = `unless-stopped` | 容器退了就自己拉起来 | `docker inspect 101rtnotice --format '{{.HostConfig.RestartPolicy.Name}}'` |
+| **dockerd 自身开机自启** | 宿主机重启后把容器带回来 | `systemctl is-enabled docker` → 应为 `enabled` |
+
+> 很多人只配了第一条就以为万事大吉。如果 `dockerd` 没设开机自启，主机一重启容器就永远不会回来。
+
+#### 什么情况会自动拉起
+
+| 场景 | 是否自启 | 说明 |
+|---|---|---|
+| 容器内进程崩溃退出 | ✅ | 立即重启 |
+| 宿主机重启 / 断电恢复 | ✅ | dockerd 启动后拉起 |
+| 手动 `docker stop` / `docker kill` / `docker compose stop` | ❌ | **属「显式停止」，策略会被挂起**，直到你重新 `docker compose up -d` |
+| `docker compose down` | ❌ | 容器被删除，策略随之消失，需重新 `up -d` |
+| 容器内进程反复崩溃 | ✅ 但会退避 | 启动间隔翻倍（100ms → 200ms → …），避免刷屏 |
+
+⚠️ **最容易踩的坑**：为了「重启一下服务」而执行 `docker stop` / `docker kill`，
+以为它会自己回来 —— 实际上不会，`restart` 策略已经被挂起了。**统一用 `docker compose restart`**，
+它不会挂起策略：
+
+```bash
+sg docker -c 'docker compose restart'   # 重启应用（保留策略）
+sg docker -c 'docker compose up -d'     # 修改配置后重新应用
+```
+
+#### 验证自动恢复
+
+```bash
+# 模拟真实崩溃（容器内部杀掉进程，而不是 docker kill）
+sg docker -c 'docker exec 101rtnotice sh -c "kill -9 \$(pgrep -f \"node src/server.js\")"'
+sleep 8
+sg docker -c 'docker inspect 101rtnotice --format "状态: {{.State.Status}}  重启次数: {{.RestartCount}}"'
+# 预期输出：状态: running  重启次数: 1
+curl -s http://127.0.0.1:8686/api/health
+```
+
+#### 对 A 端的影响
+
+服务器重启期间，A 端会保留当前画面并持续静默重试，恢复后 **≤15 秒**内自动同步到最新内容，
+不会出现空白或报错画面。
+
+同时 A 端心跳（`lastSeenA`）是**落盘**的，所以重启不会重置 24 小时回收倒计时 ——
+只要停机时间累计不超过 24 小时，房间与消息都不会丢。
+
 ---
 
 ## 3. ⚠️ 时区：部署前必读
@@ -204,8 +254,6 @@ docker run -e TZ=Asia/Shanghai ...
 > 排查提示：alpine 基础镜像不含 `tzdata`，`docker exec 容器 date` 可能显示 UTC。
 > 这是 busybox `date` 解析不了时区名所致；应用使用 Node（自带 ICU 时区库）读取 `TZ`，
 > 行为正确，**请以启动日志打印的服务器时间为准**。
-
----
 
 ---
 
