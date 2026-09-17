@@ -237,7 +237,13 @@ app.put('/api/rooms/:roomId/settings', async (req, res, next) => {
       });
     }
 
-    room.settings = { fontSize, nightStart, nightEnd };
+    room.settings = {
+      fontSize,
+      nightStart,
+      nightEnd,
+      // 留空 = 使用系统默认字体栈
+      fontFamily: store.normalizeFontFamily(body.fontFamily),
+    };
     await store.persist(room);
 
     return res.json({ ok: true, serverTime: Date.now(), settings: room.settings });

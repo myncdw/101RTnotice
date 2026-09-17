@@ -5,6 +5,9 @@
 
 :root {
   color-scheme: light;
+  /* 系统默认字体栈；自定义字体族会拼在它前面，拼不上时自动回落 */
+  --font-stack: system-ui, -apple-system, 'Noto Sans CJK SC', 'PingFang SC',
+    'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
   --bg: #f4f5f8;
   --fg: #14161c;
   --muted: #6b7280;
@@ -39,8 +42,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font-family: system-ui, -apple-system, 'Noto Sans CJK SC', 'PingFang SC',
-    'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  font-family: var(--font-stack);
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
 }

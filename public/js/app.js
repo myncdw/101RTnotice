@@ -19,7 +19,12 @@
   const PUSH_RETRY_MAX = 3;       // 失败后最多重试 3 次
   const PUSH_RETRY_INTERVAL = 3000;
 
-  const DEFAULT_SETTINGS = { fontSize: DEFAULT_FONT_SIZE, nightStart: '20:00', nightEnd: '06:00' };
+  const DEFAULT_SETTINGS = {
+    fontSize: DEFAULT_FONT_SIZE,
+    nightStart: '20:00',
+    nightEnd: '06:00',
+    fontFamily: null,
+  };
 
   /** 房间号：与 src/config.js 的 roomIdLength / roomIdAlphabet 保持一致 */
   const ROOM_ID_LENGTH = 4;
@@ -210,6 +215,7 @@
       bg,
       fg,
       fontSize: state.settings.fontSize,
+      fontFamily: state.settings.fontFamily || '',
       night,
     });
   }
@@ -711,6 +717,9 @@
   const bgSelect = $('bgSelect');
   const bgHex = $('bgHex');
   const bgPicker = $('bgPicker');
+  const fgSelect = $('fgSelect');
+  const fgHex = $('fgHex');
+  const fgPicker = $('fgPicker');
 
   textEl.addEventListener('input', () => {
     if (textEl.value.length > MAX_TEXT) {
@@ -719,36 +728,42 @@
     $('textCounter').textContent = `${textEl.value.length}/${MAX_TEXT}`;
   });
 
-  function syncBgControls() {
-    const isCustom = bgSelect.value === 'custom';
-    bgHex.disabled = !isCustom;
-    bgPicker.disabled = !isCustom;
+  /** 下拉选「自定义」时才启用右侧 Hex 输入框与取色器 */
+  function syncColorControls(select, hex, picker) {
+    const isCustom = select.value === 'custom';
+    hex.disabled = !isCustom;
+    picker.disabled = !isCustom;
     if (!isCustom) {
-      bgHex.value = bgSelect.value;
-      bgPicker.value = bgSelect.value;
+      hex.value = select.value;
+      picker.value = select.value;
     }
   }
 
-  bgSelect.addEventListener('change', syncBgControls);
+  /** @returns {string|null} null 表示自定义 Hex 格式不合法 */
+  function resolveColor(select, hex) {
+    if (select.value !== 'custom') return select.value;
+    const v = (hex.value || '').trim().toLowerCase();
+    return /^#[0-9a-f]{6}$/.test(v) ? v : null;
+  }
 
-  bgHex.addEventListener('input', () => {
-    const v = (bgHex.value || '').trim().toLowerCase();
-    if (/^#[0-9a-f]{6}$/.test(v)) bgPicker.value = v;
-  });
+  function bindColorControls(select, hex, picker) {
+    select.addEventListener('change', () => syncColorControls(select, hex, picker));
+    hex.addEventListener('input', () => {
+      const v = (hex.value || '').trim().toLowerCase();
+      if (/^#[0-9a-f]{6}$/.test(v)) picker.value = v;
+    });
+    picker.addEventListener('input', () => {
+      hex.value = picker.value.toLowerCase();
+    });
+    syncColorControls(select, hex, picker);
+  }
 
-  bgPicker.addEventListener('input', () => {
-    bgHex.value = bgPicker.value.toLowerCase();
-  });
+  bindColorControls(bgSelect, bgHex, bgPicker);
+  bindColorControls(fgSelect, fgHex, fgPicker);
 
   $('btnClearExpire').addEventListener('click', () => {
     $('expireAt').value = '';
   });
-
-  function resolveBg() {
-    if (bgSelect.value !== 'custom') return bgSelect.value;
-    const v = (bgHex.value || '').trim().toLowerCase();
-    return /^#[0-9a-f]{6}$/.test(v) ? v : null;
-  }
 
   function countdownLoading(btn, ms) {
     return new Promise((resolve) => {
@@ -800,12 +815,16 @@
       return;
     }
 
-    const bg = resolveBg();
+    const bg = resolveColor(bgSelect, bgHex);
     if (!bg) {
-      RTN.toast('自定义颜色格式应为 #RRGGBB');
+      RTN.toast('自定义背景色格式应为 #RRGGBB');
       return;
     }
-    const fg = $('fgSelect').value;
+    const fg = resolveColor(fgSelect, fgHex);
+    if (!fg) {
+      RTN.toast('自定义字体色格式应为 #RRGGBB');
+      return;
+    }
 
     const expireRaw = ($('expireAt').value || '').trim();
     if (expireRaw) {
@@ -897,6 +916,7 @@
     $('setFontSize').value = String(state.settings.fontSize);
     $('setNightStart').value = state.settings.nightStart || '';
     $('setNightEnd').value = state.settings.nightEnd || '';
+    $('setFontFamily').value = state.settings.fontFamily || '';
     $('encInfo').textContent = state.enc ? '已开启（通知以密文存储）' : '未开启';
     $('btnForgetPassword').classList.toggle('is-hidden', !state.enc);
     hide($('settingsError'));
@@ -915,6 +935,12 @@
     $('setNightEnd').value = '';
   });
 
+  // 恢复默认字体：留空 = 使用系统默认字体栈
+  $('btnResetFontFamily').addEventListener('click', () => {
+    $('setFontFamily').value = '';
+    RTN.toast('已填为系统默认字体，点「保存设置」生效');
+  });
+
   $('btnSaveSettings').addEventListener('click', async () => {
     const raw = ($('setFontSize').value || '').trim();
     const parsed = Number(raw);
@@ -930,11 +956,13 @@
 
     const nightStart = ($('setNightStart').value || '').trim() || null;
     const nightEnd = ($('setNightEnd').value || '').trim() || null;
+    // 留空 = 系统默认字体栈
+    const fontFamily = ($('setFontFamily').value || '').trim() || null;
 
     const btn = $('btnSaveSettings');
     btn.disabled = true;
     try {
-      const payload = await API.saveSettings(state.roomId, { fontSize, nightStart, nightEnd });
+      const payload = await API.saveSettings(state.roomId, { fontSize, nightStart, nightEnd, fontFamily });
       state.settings = payload.settings;
       RTN.theme.applyShellTheme(RTN.theme.isNight(state.settings));
 
@@ -942,6 +970,7 @@
         $('setFontSize').value = String(DEFAULT_FONT_SIZE);
         $('setNightStart').value = state.settings.nightStart || '';
         $('setNightEnd').value = state.settings.nightEnd || '';
+        $('setFontFamily').value = state.settings.fontFamily || '';
         showSettingsError('字号输入非法（须为不小于 24 的整数），已恢复为 42。');
       } else {
         hide($('settingsError'));
@@ -978,7 +1007,6 @@
 
   function boot() {
     RTN.renderer.init();
-    syncBgControls();
 
     // 夜间边界兜底：即使不在轮询也保证界面主题跟随本地时间
     setInterval(() => {

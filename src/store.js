@@ -101,11 +101,29 @@ function normalizeEnc(raw) {
   return { enc: { v: 1, salt, iter, check }, invalid: false };
 }
 
+/**
+ * 规整自定义字体族。
+ * 返回值会经 CSSOM 赋给 element.style.fontFamily，本身无法注入额外声明，
+ * 这里再剔掉分隔符与控制字符，并限制长度，避免存垃圾数据。
+ * @returns {string|null} null 表示使用系统默认字体栈
+ */
+function normalizeFontFamily(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string') return null;
+  const cleaned = value
+    .replace(/[<>{};\\]/g, '')
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim();
+  if (!cleaned) return null;
+  return cleaned.slice(0, config.maxFontFamilyLength);
+}
+
 function defaultSettings() {
   return {
     fontSize: config.defaultFontSize,
     nightStart: config.defaultNightStart,
     nightEnd: config.defaultNightEnd,
+    fontFamily: null,
   };
 }
 
@@ -184,6 +202,7 @@ function normalizeRoom(raw, roomId) {
       fontSize,
       nightStart: normalizeTime(s.nightStart),
       nightEnd: normalizeTime(s.nightEnd),
+      fontFamily: normalizeFontFamily(s.fontFamily),
     },
     enc: normalizeEnc(r.enc).enc,
     message: normalizeMessage(r.message),
@@ -401,6 +420,7 @@ module.exports = {
   isValidRoomId,
   normalizeRoomId,
   normalizeEnc,
+  normalizeFontFamily,
   roomError,
   normHex,
   normalizeTime,

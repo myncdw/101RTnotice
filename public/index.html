@@ -77,10 +77,17 @@
 
         <div class="field">
           <span class="field-label">字体色</span>
-          <select id="fgSelect" class="select">
-            <option value="#000000" selected>黑</option>
-            <option value="#ffffff">白</option>
-          </select>
+          <div class="row">
+            <select id="fgSelect" class="select">
+              <option value="#000000" selected>黑</option>
+              <option value="#ffffff">白</option>
+              <option value="#e53935">红</option>
+              <option value="custom">自定义</option>
+            </select>
+            <input id="fgHex" class="input hex-input" type="text" value="#000000"
+                   spellcheck="false" autocomplete="off" disabled />
+            <input id="fgPicker" class="color-picker" type="color" value="#000000" disabled />
+          </div>
         </div>
 
         <div class="field">
@@ -106,6 +113,19 @@
           <input id="setFontSize" class="input" type="number" min="24" step="1"
                  inputmode="numeric" value="42" />
         </label>
+
+        <div class="field">
+          <span class="field-label">
+            通知文字字体
+            <span class="counter">留空用系统默认</span>
+          </span>
+          <div class="row">
+            <input id="setFontFamily" class="input" type="text" maxlength="100"
+                   spellcheck="false" autocomplete="off"
+                   placeholder="例如：楷体、思源黑体、Noto Sans SC" />
+            <button id="btnResetFontFamily" class="ghost-btn" type="button">恢复默认</button>
+          </div>
+        </div>
 
         <div class="field">
           <span class="field-label">夜间模式（留空即关闭）</span>

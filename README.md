@@ -304,6 +304,8 @@ docker run -e TZ=Asia/Shanghai ...
 | 通知加密 | 创建房间时填了密码就开启；密码只存在浏览器，服务端只存密文。加入加密房间必须输对密码，否则提示「密码错误」 |
 | 退出房间 | 首页的「退出房间」只需确认一下；它**只清当前会话**，房间号与密码会记住，下次一键重新加入。想彻底清除就用设置里的「忘记本机保存的密码」 |
 | 密码记忆 | 加入过的房间号与密码存在浏览器本地（各保留最近 20 个），下次在「加入」面板会自动预填，不用再输一遍 |
+| 字体色 | 编辑页提供黑 / 白 / 红 / 自定义；选「自定义」才启用右侧 Hex 输入框与取色器 |
+| 字体大小与字体族 | 两者都是**房间级**设置（在「设置」页），A 端显示跟着变。字体族留空 = 系统默认；填了会拼在系统字体栈**前面**，设备上没装该字体时自动回落，不会变成空白 |
 | 断网 | A 端保留当前画面并静默持续重试，不出现空白或报错画面 |
 
 ### 5.1 通知加密（可选密码）
@@ -412,11 +414,13 @@ docker run -e TZ=Asia/Shanghai ...
 ### 设置请求体
 
 ```json
-{ "fontSize": 42, "nightStart": "20:00", "nightEnd": "06:00" }
+{ "fontSize": 42, "nightStart": "20:00", "nightEnd": "06:00", "fontFamily": "楷体" }
 ```
 
 - `fontSize` 必须是不小于 `24` 的整数；非法时返回 `400 INVALID_FONT_SIZE`，并把房间字号**恢复为 42**；
-- `nightStart` / `nightEnd` 为 `HH:MM`，留空（`null` / `""`）即关闭夜间模式。
+- `nightStart` / `nightEnd` 为 `HH:MM`，留空（`null` / `""`）即关闭夜间模式；
+- `fontFamily` 为通知文字的自定义字体族，留空（`null` / `""`）即使用系统默认字体栈。
+  含逗号视为字体列表，否则整体作为单个字体名。服务端会剔除 `<>{};` 与控制字符并限制长度。
 
 ---
 
@@ -444,6 +448,7 @@ docker run -e TZ=Asia/Shanghai ...
 | `maxEncryptedTextLength` | 2000（密文上限） | 5.1 |
 | `discardWindowMs` | 3000 ms | 4.2 |
 | `defaultFontSize` / `minFontSize` | 42 / 24 | 4.3 / 4.6 |
+| `maxFontFamilyLength` | 100（自定义字体族长度上限） | 见 5 节 |
 
 前端常量集中在 `public/js/app.js` 顶部：轮询 5 秒（A）/ 30 秒（B）、loading 5 秒、冷却 10 秒、重试 3 次、字号下限 24；
 滚动参数在 `public/js/renderer.js`：`SCROLL_SPEED = 20` px/s、`SCROLL_PAUSE = 5000` ms。
@@ -471,6 +476,7 @@ docker run -e TZ=Asia/Shanghai ...
 | 30 | 容器重启不丢数据、TTL 继续生效 | `store.init()` + `expiry.restoreAll()` |
 | 31–32 | 长时运行、断网自恢复 | 轮询用 `setTimeout` 链（不会堆积）、失败静默重试 |
 | — | 加密房间：密码错立即提示、重载后自动解密、明文/密文不可混推 | `public/js/crypto.js` + `server.js` 的 `ROOM_ENCRYPTED` 校验 |
+| — | 更新后不闪屏：内容无变化时不重复渲染 DOM（字体色/字族变化会触发重排） | `public/js/renderer.js` 的签名比对 |
 
 ---
 

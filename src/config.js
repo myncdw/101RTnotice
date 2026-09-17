@@ -38,4 +38,6 @@ module.exports = {
   minFontSize: 24,
   defaultNightStart: '20:00',
   defaultNightEnd: '06:00',
+  /** 自定义字体族名称的长度上限（留空即使用系统默认字体栈） */
+  maxFontFamilyLength: 100,
 };

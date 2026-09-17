@@ -137,17 +137,39 @@
   // ---------------------------------------------------------- 渲染
 
   /**
-   * @param {{text:string,bg:string,fg:string,fontSize:number,night:boolean}} state
+   * 把自定义字体族拼到系统默认字体栈前面。
+   * - 含逗号视为字体列表，原样使用
+   * - 否则整体加引号，允许「思源黑体」「Noto Sans SC」这类含空格的名字
+   * - 值为空或整条声明非法时，浏览器会忽略它，自动回落继承 body 的 --font-stack
+   */
+  function buildFontFamily(custom) {
+    const v = typeof custom === 'string' ? custom.trim() : '';
+    if (!v) return '';
+    const head = v.includes(',') ? v : `"${v.replace(/"/g, '')}"`;
+    return `${head}, var(--font-stack)`;
+  }
+
+  /**
+   * @param {{text:string,bg:string,fg:string,fontSize:number,night:boolean,fontFamily?:string}} state
    */
   function render(state) {
     if (!R.stage) return;
 
-    const sig = [state.text, state.bg, state.fg, state.fontSize, state.night ? 1 : 0].join('\u0000');
+    const fontFamily = state.fontFamily || '';
+    const sig = [
+      state.text,
+      state.bg,
+      state.fg,
+      state.fontSize,
+      state.night ? 1 : 0,
+      fontFamily,
+    ].join('\u0000');
     if (sig === R.sig) return; // 内容无变化 -> 不重复渲染 DOM
     R.sig = sig;
 
     R.stage.style.backgroundColor = state.bg;
     R.textEl.style.color = state.fg;
+    R.textEl.style.fontFamily = buildFontFamily(fontFamily);
     R.fontSize = state.fontSize;
 
     if (R.textEl.textContent !== state.text) {
