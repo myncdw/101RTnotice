@@ -1,0 +1,292 @@
+# 101实时通知
+
+> 单房间、单向推送、被动展示的**厨房通知屏**。
+> 在外的人用手机编辑并推送，厨房里横放的 Android 设备零操作地醒目显示。
+
+实现依据：`PRD.md`（v1.0 最终版）。产品背景见 `基础描述.md`。
+
+---
+
+## 1. 技术栈与结构
+
+| 层 | 选型 |
+|---|---|
+| 服务端 | Node.js 20+ / Express 4（单进程，无数据库） |
+| 前端 | 原生 HTML / CSS / JS（无构建步骤，无框架） |
+| 持久化 | 每个房间一个目录，JSON 文件 + 原子写入（临时文件 → fsync → rename） |
+| 交付 | 单一 Docker 镜像，数据目录 `/data` 通过卷映射持久化 |
+
+```
+.
+├── Dockerfile
+├── docker-compose.yml
+├── package.json
+├── src
+│   ├── config.js      全局参数（房间长度/字符集、24h 回收、3s 丢弃窗口、字号上下限…）
+│   ├── store.js       房间与消息的读写、原子落盘、房间回收
+│   ├── expiry.js      存活期定时器（内存定时器 + 启动时重建）
+│   └── server.js      Express 应用与接口
+└── public
+    ├── index.html
+    ├── css/style.css  浅色 / 深色双主题，全部响应式
+    └── js
+        ├── core.js      DOM 工具、Toast、确认框、localStorage 会话
+        ├── audio.js     合成「叮」声与音频解锁
+        ├── theme.js     夜间模式判定与界面主题
+        ├── renderer.js  A 端排版（换行 → 缩字号 → 往复滚动）与局部 DOM 更新
+        └── app.js       主控制器（房间入口 / 身份 / 轮询 / 编辑推送 / 设置）
+```
+
+---
+
+## 2. 快速开始
+
+### 2.1 Docker Compose（推荐）
+
+```bash
+docker compose up -d --build
+```
+
+服务监听 `8686`，用浏览器访问 `http://<服务器IP>:8686`。
+
+### 2.2 docker run
+
+```bash
+docker build -t 101rtnotice:1.0.0 .
+
+docker run -d \
+  --name 101rtnotice \
+  --restart unless-stopped \
+  -p 8686:8686 \
+  -e TZ=Asia/Shanghai \
+  -v rtn-data:/data \
+  101rtnotice:1.0.0
+```
+
+### 2.3 改用宿主目录存数据（便于备份）
+
+```bash
+mkdir -p ./data && sudo chown -R 1000:1000 ./data
+```
+
+然后在 `docker-compose.yml` 中改用 `- ./data:/data`（容器内以 uid 1000 的 `node` 用户运行）。
+
+### 2.4 用 localhost 先跑一遍（开发）
+
+```bash
+npm install
+DATA_DIR=./data PORT=8686 npm start
+```
+
+### 2.5 构建时拉不到基础镜像怎么办
+
+若 `docker build` 报 `failed to resolve source metadata for docker.io/library/node:22-alpine`（Docker Hub 不可达），
+先用国内加速源把基础镜像拉下来并打上本地标签，再构建即可：
+
+```bash
+docker pull docker.m.daocloud.io/library/node:22-alpine
+docker tag  docker.m.daocloud.io/library/node:22-alpine node:22-alpine
+docker build -t 101rtnotice:1.0.0 .
+```
+
+或给 Docker 配置全局加速器（`/etc/docker/daemon.json` 的 `registry-mirrors`，需 root 并重启 dockerd）。
+
+### 2.6 ⚠️ 换端口时注意浏览器的「不安全端口」
+
+Chromium 系浏览器（Chrome / Edge，也就是 A 端与 B 端使用的内核）内置了一份端口黑名单，
+**用浏览器直接访问这些端口会得到 `ERR_UNSAFE_PORT`，页面根本打不开**（服务本身与 `curl` 是正常的）。
+
+已被拦截的常见端口：`6000`、`6566`、`6665`–`6669`、`6697`、`10080`、`5060`、`21`、`25`、`110` 等。
+
+> 若通过 HTTPS 域名（443）由反向代理转发到容器，浏览器看不到容器端口，则不受此限制。
+> 但局域网直连调试时会被拦，因此默认端口选了不在列表里的 `8686`。
+
+可安全使用：`8686`、`6688`、`8888`、`6060`、`7000`、`8080`、`9000`、`3333`。
+
+---
+
+## 3. ⚠️ 时区：部署前必读
+
+**存活期销毁、房间回收、3 秒丢弃窗口全部以「服务器时间」为准**（PRD 4.7）。
+容器默认 `TZ=UTC`，中国大陆用户如果不设置时区，把存活期填 `21:00` 实际会在本地次日 05:00 才销毁。
+
+本镜像的 `TZ` 默认值为 `Asia/Shanghai`，可用环境变量覆盖：
+
+```bash
+docker run -e TZ=Asia/Shanghai ...
+```
+
+服务启动日志会打印当前服务器时间与时区偏移，请确认一次：
+
+```
+[server] 服务器时间：Thu Sep 17 2026 13:54:00 GMT+0800 (中国标准时间) (UTC+08:00)
+```
+
+> 排查提示：alpine 基础镜像不含 `tzdata`，`docker exec 容器 date` 可能显示 UTC。
+> 这是 busybox `date` 解析不了时区名所致；应用使用 Node（自带 ICU 时区库）读取 `TZ`，
+> 行为正确，**请以启动日志打印的服务器时间为准**。
+
+---
+
+---
+
+## 4. A 端（展示端）使用前置条件
+
+| # | 条件 | 说明 |
+|---|---|---|
+| 1 | 充电 + 屏幕常亮 | 系统设置中开启「充电时不锁定屏幕」，并把浏览器加入后台白名单 |
+| 2 | 每次打开 / 重载页面后**手动点击一次「查看」** | 浏览器自动播放策略所限，音频解锁必须由用户手势触发；页面会显示一个半透明「查看」按钮提醒 |
+| 3 | 保持联网 | 建议通过 HTTPS 域名访问 |
+| 4 | 建议物理横放 | 全屏与横屏锁定为尽力能力，不支持时靠响应式布局兜底 |
+| 5 | 房间存续依赖 A 端 | 连续 24 小时无 A 端轮询，房间、消息与设置会被服务器删除 |
+
+**页面级兜底能力**（尽力而为，失败不影响使用）：
+`navigator.wakeLock` 屏幕常亮、`requestFullscreen()` 全屏、`screen.orientation.lock('landscape')` 横屏锁定。
+
+### 查看模式下如何切回「身份 / 设置」
+
+查看模式刻意不显示任何操作控件（避免厨房设备被误触）。
+**连点两下画面任意位置**即可回到「选择身份」界面，再点「设置」进入房间设置。
+
+---
+
+## 5. 行为说明（易被误解的几点）
+
+| 行为 | 说明 |
+|---|---|
+| 推送后为什么不立刻发出请求 | `确认推送` 先 loading 5 秒再提交，用于避开服务器的 3 秒丢弃窗口（PRD 4.2） |
+| 10 秒内又点了一次推送 | 会被前端拦下并提示剩余秒数；同一设备 10 秒内不能提交第二次 |
+| 服务器返回 `discarded` | 表示距上一条消息不足 3 秒，该消息被服务器丢弃，A 端内容不变 |
+| 存活期填了已经过去的时刻 | 前端弹「将会在次日销毁此消息，是否确认」，确认后按**次日**该时刻销毁；取消则不提交 |
+| 页面不显示剩余时长 | 按 PRD 要求，编辑页与查看页都不做任何时长换算与倒计时 |
+| 销毁的表现 | 服务器写入一条「白底 + 单个空格」的消息，A 端表现为白底空白，**不响铃** |
+| 夜间模式下 A 端的配色 | 强制黑底白字，覆盖用户在编辑页选的背景色 / 字体色；界面同时转深色 |
+| 夜间模式下 B 端 | 只有它自己的界面转深色，**不影响它编辑的消息样式** |
+| 夜间模式留空 | 开始或结束任一留空即视为关闭夜间模式 |
+| 多台 A 端 / 多台 B 端 | 可以同时在同一个房间，身份不固定，设置房间级共享 |
+| 断网 | A 端保留当前画面并静默持续重试，不出现空白或报错画面 |
+
+---
+
+## 6. 接口
+
+房间号本身即访问凭据，无需账号密码。房间不存在（含被回收）统一返回：
+
+```json
+404 { "ok": false, "error": "ROOM_NOT_FOUND", "message": "房间不存在" }
+```
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/api/health` | 健康检查（含 `serverTime`） |
+| `POST` | `/api/rooms` | 创建房间，返回随机 8 位房间号 |
+| `GET` | `/api/rooms/:roomId` | 加入前的存在性校验 |
+| `GET` | `/api/rooms/:roomId/state?role=A\|B` | 轮询。`role=A` 会记录 A 端心跳（房间存续唯一依据），`role=B` 不计入活跃度 |
+| `POST` | `/api/rooms/:roomId/messages` | 推送消息，整条覆盖上一条 |
+| `PUT` | `/api/rooms/:roomId/settings` | 更新房间设置（字号、夜间时间） |
+
+### 推送请求体
+
+```json
+{
+  "text": "饭好了，下来吃饭",
+  "bg": "#fdd835",
+  "fg": "#000000",
+  "expireAt": "21:00"
+}
+```
+
+- `text` ≤ 100 字；`bg` / `fg` 为 `#RRGGBB`（非法值回退为白底黑字）；
+- `expireAt` 为 `HH:MM`，`null` / 省略表示永久存活；
+- 距上一条消息不足 3 秒 → 返回 `{ "ok": true, "discarded": true }`。
+
+### 设置请求体
+
+```json
+{ "fontSize": 42, "nightStart": "20:00", "nightEnd": "06:00" }
+```
+
+- `fontSize` 必须是不小于 `24` 的整数；非法时返回 `400 INVALID_FONT_SIZE`，并把房间字号**恢复为 42**；
+- `nightStart` / `nightEnd` 为 `HH:MM`，留空（`null` / `""`）即关闭夜间模式。
+
+---
+
+## 7. 数据与持久化
+
+```
+/data/rooms/<ROOMID>/room.json      房间元信息 + 房间级设置 + 最近一次 A 端轮询时间
+/data/rooms/<ROOMID>/message.json   当前消息（消息单独存放于独立文件夹）
+```
+
+- 每次变更使用「临时文件 → `fsync` → `rename`」原子写入，断电不会产生半截 JSON；
+- A 端心跳（每 5 秒一次）在内存中累积，**每 60 秒**批量回写一次，退出前强制落盘；
+- **容器重启后**：房间与当前消息不丢失；所有未到期的存活期按原定时刻继续生效，重启期间已到期的会立即补一次销毁。
+
+---
+
+## 8. 主要参数（`src/config.js`）
+
+| 参数 | 值 | 对应 PRD |
+|---|---|---|
+| `roomIdLength` / `roomIdAlphabet` | 8 位 / `A-Z0-9` | 4.1 |
+| `roomRecycleMs` | 24 小时 | 4.1 |
+| `sweepIntervalMs` | 60 秒 | 巡检 + 心跳回写 |
+| `maxTextLength` | 100 | 4.2 |
+| `discardWindowMs` | 3000 ms | 4.2 |
+| `defaultFontSize` / `minFontSize` | 42 / 24 | 4.3 / 4.6 |
+
+前端常量集中在 `public/js/app.js` 顶部：轮询 5 秒（A）/ 30 秒（B）、loading 5 秒、冷却 10 秒、重试 3 次、字号下限 24；
+滚动参数在 `public/js/renderer.js`：`SCROLL_SPEED = 20` px/s、`SCROLL_PAUSE = 5000` ms。
+
+---
+
+## 9. 验收对照
+
+| # | 验收项 | 实现位置 |
+|---|---|---|
+| 1–2 | 创建 / 加入、房间不存在提示 | `public/js/app.js` 入口弹窗 + `GET /api/rooms/:roomId` |
+| 3–4 | localStorage 记忆、房间消失回弹窗 | `RTN.session` + `handleRoomGone()` |
+| 5 | 多台 A / 多台 B 同时在线 | 身份不固定，无连接数限制 |
+| 6 | 24 小时无 A 端轮询回收房间 | `store.sweep()` + `lastSeenA` |
+| 7–8 | 100 字上限与实时计数、背景「无」= 白底 | `maxlength` + `input` 计数；`#ffffff` 选项 |
+| 9–10 | 存活期次日确认、不显示剩余时长 | `btnPush` 处理流程 + `RTN.dialog` |
+| 11 | loading 5 秒、10 秒冷却、3 秒丢弃窗口 | `countdownLoading()` / `PUSH_COOLDOWN_MS` / `server.js` 丢弃判断 |
+| 12 | 失败重试 3 次后提示 | `pushWithRetry()` |
+| 13–14 | 永久存活、到点写空白消息 | `resolveExpireAt()` / `expiry.js` / `store.destroyMessage()` |
+| 15–18 | 居中、换行、缩字号（≥24）、往复滚动、空消息 | `public/js/renderer.js` |
+| 19–22 | 夜间模式配色 / 静音 / 恢复 / 不补响 | `theme.js` + `applyMessageToView()` |
+| 23 | B 端仅自身界面转深色 | `applyShellTheme()` |
+| 24–26 | 提示音触发与不触发条件 | `audio.js` + `onState()` |
+| 27–29 | 字号校验与恢复 42、房间级同步 | `btnSaveSettings` + `PUT /settings` + B 端 30 秒轮询 |
+| 30 | 容器重启不丢数据、TTL 继续生效 | `store.init()` + `expiry.restoreAll()` |
+| 31–32 | 长时运行、断网自恢复 | 轮询用 `setTimeout` 链（不会堆积）、失败静默重试 |
+
+---
+
+## 10. 本实现中自行决定的点（可调整）
+
+PRD 未明确、实现时做了取舍，列在这里便于复核：
+
+1. **查看模式下不常驻操作按钮**：厨房设备无人操作，避免误触；用「连点两下画面」切回身份界面。
+2. **重载后自动进入查看模式**（满足 PRD 4.1「不再弹窗」），但仍保留一个半透明「查看」按钮用于解锁音频（满足 PRD 0.2）。
+3. **`TZ` 默认 `Asia/Shanghai`**：PRD 只说「以服务器时间为准」，未指定时区；默认按中国大陆用户预期。
+4. **房间号字符集含全部 `A-Z0-9`**：严格按 PRD 的「字母 + 数字」，未剔除易混淆字符（输入不区分大小写）。
+5. **推送重试语义**：`最多重试 3 次` 实现为「首次 + 最多 3 次重试」，间隔 3 秒。
+6. **同一设备 10 秒冷却**从点击时刻起算（含那 5 秒 loading）。
+7. **夜间模式跨午夜且 `开始 == 结束` 时视为关闭**（否则会全天静音，属于明显不合理的配置）。
+
+---
+
+## 11. 不在本需求范围
+
+- 部署方式、隧道 / 穿透与网络加速方案；
+- HTTPS 证书与反向代理（容器只暴露 `8686`，按你既有的通道配置转发到 `101RTnotice.myncdw.top`）；
+- 埋点、统计与监控。
+
+---
+
+## 12. 许可证
+
+[MIT License](./LICENSE) © 2026 myncdw
+
+可自由使用、修改、商用与再发布，只需保留版权声明与许可证文本。

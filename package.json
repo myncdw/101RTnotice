@@ -1,0 +1,18 @@
+{
+  "name": "101-rt-notice",
+  "version": "1.0.0",
+  "private": true,
+  "description": "101实时通知：单房间、单向推送、被动展示的厨房通知屏",
+  "license": "MIT",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

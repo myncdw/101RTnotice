@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#ffffff" />
+  <title>101实时通知</title>
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+
+  <!-- ==================== A 端查看视图 ==================== -->
+  <div id="viewStage" class="view-stage is-hidden">
+    <div class="view-inner" id="viewInner">
+      <div class="view-text" id="viewText"></div>
+    </div>
+  </div>
+
+  <!-- 音频解锁按钮：每次打开/重载页面后必须点一次（浏览器自动播放策略所限） -->
+  <button id="unlockBtn" class="unlock-btn is-hidden" type="button">查看</button>
+
+  <!-- ==================== 应用外壳（B 端 / 设置） ==================== -->
+  <div id="appShell" class="app-shell is-hidden">
+    <header class="topbar">
+      <div class="topbar-left">
+        <span class="room-badge" id="roomBadge">--------</span>
+        <span class="role-badge" id="roleBadge"></span>
+      </div>
+      <div class="topbar-right">
+        <button id="btnHome" class="icon-btn is-hidden" type="button">身份</button>
+        <button id="btnSettings" class="icon-btn" type="button">设置</button>
+      </div>
+    </header>
+
+    <main class="panel-area">
+      <!-- 身份 -->
+      <section id="identityPanel" class="panel">
+        <h1 class="panel-title">选择身份</h1>
+        <p class="panel-hint">长期放在厨房的展示端请选「查看」；在外编辑的请选「编辑」。</p>
+        <div class="identity-stack">
+          <button id="btnView" class="big-btn" type="button">查看</button>
+          <button id="btnEdit" class="big-btn" type="button">编辑</button>
+        </div>
+      </section>
+
+      <!-- 编辑 -->
+      <section id="editPanel" class="panel is-hidden">
+        <h1 class="panel-title">编辑通知</h1>
+
+        <label class="field">
+          <span class="field-label">
+            通知内容
+            <span class="counter" id="textCounter">0/100</span>
+          </span>
+          <textarea id="editText" class="textarea" rows="5" maxlength="100"
+                    placeholder="例如：饭好了，下来吃饭"></textarea>
+        </label>
+
+        <div class="field">
+          <span class="field-label">背景色</span>
+          <div class="row">
+            <select id="bgSelect" class="select">
+              <option value="#e53935">红</option>
+              <option value="#fb8c00">橙</option>
+              <option value="#fdd835">黄</option>
+              <option value="#2196f3">蓝</option>
+              <option value="#43a047">绿</option>
+              <option value="#ffffff" selected>无</option>
+              <option value="custom">自定义</option>
+            </select>
+            <input id="bgHex" class="input hex-input" type="text" value="#ffffff"
+                   spellcheck="false" autocomplete="off" disabled />
+            <input id="bgPicker" class="color-picker" type="color" value="#ffffff" disabled />
+          </div>
+        </div>
+
+        <div class="field">
+          <span class="field-label">字体色</span>
+          <select id="fgSelect" class="select">
+            <option value="#000000" selected>黑</option>
+            <option value="#ffffff">白</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <span class="field-label">存活期（留空 = 永久）</span>
+          <div class="row">
+            <input id="expireAt" class="input time-input" type="time" step="60" />
+            <button id="btnClearExpire" class="ghost-btn" type="button">留空</button>
+          </div>
+        </div>
+
+        <button id="btnPush" class="primary-btn" type="button">确认推送</button>
+        <p class="panel-hint" id="pushHint"></p>
+      </section>
+
+      <!-- 设置 -->
+      <section id="settingsPanel" class="panel is-hidden">
+        <h1 class="panel-title">房间设置</h1>
+        <p class="panel-hint">设置为房间级共享，保存后对房间内所有设备（含 A 端）生效。</p>
+
+        <label class="field">
+          <span class="field-label">字体大小（≥ 24，默认 42）</span>
+          <input id="setFontSize" class="input" type="number" min="24" step="1"
+                 inputmode="numeric" value="42" />
+        </label>
+
+        <div class="field">
+          <span class="field-label">夜间模式（留空即关闭）</span>
+          <div class="row">
+            <input id="setNightStart" class="input time-input" type="time" step="60" />
+            <span class="dash">—</span>
+            <input id="setNightEnd" class="input time-input" type="time" step="60" />
+            <button id="btnClearNight" class="ghost-btn" type="button">留空</button>
+          </div>
+        </div>
+
+        <button id="btnSaveSettings" class="primary-btn" type="button">保存设置</button>
+        <p class="error-text is-hidden" id="settingsError"></p>
+        <p class="ok-text is-hidden" id="settingsSaved"></p>
+      </section>
+    </main>
+  </div>
+
+  <!-- ==================== 入口弹窗 ==================== -->
+  <div id="entryModal" class="modal is-hidden">
+    <div class="modal-card">
+      <h2 class="modal-title">101实时通知</h2>
+      <div class="tabs">
+        <button id="tabCreate" class="tab is-active" type="button">创建</button>
+        <button id="tabJoin" class="tab" type="button">加入</button>
+      </div>
+
+      <div id="createPane" class="pane">
+        <p class="panel-hint">由系统随机生成 8 位房间号，复制给另一台设备即可加入。</p>
+        <div class="room-display" id="roomDisplay">--------</div>
+        <button id="btnCreate" class="primary-btn" type="button">生成房间号</button>
+        <div class="row">
+          <button id="btnCopyRoom" class="ghost-btn" type="button" disabled>复制房间号</button>
+          <button id="btnCreateEnter" class="primary-btn" type="button" disabled>进入房间</button>
+        </div>
+      </div>
+
+      <div id="joinPane" class="pane is-hidden">
+        <p class="panel-hint">输入 8 位房间号（字母 + 数字，不区分大小写）。</p>
+        <input id="joinInput" class="input room-input" type="text" maxlength="8"
+               autocomplete="off" autocapitalize="characters" spellcheck="false"
+               placeholder="XXXXXXXX" />
+        <button id="btnJoin" class="primary-btn" type="button">加入房间</button>
+        <p class="error-text is-hidden" id="joinError"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 通用确认对话框 ==================== -->
+  <div id="dialogModal" class="modal is-hidden">
+    <div class="modal-card">
+      <h2 class="modal-title" id="dialogTitle">提示</h2>
+      <p class="modal-text" id="dialogText"></p>
+      <div class="row end">
+        <button id="dialogCancel" class="ghost-btn" type="button">取消</button>
+        <button id="dialogOk" class="primary-btn" type="button">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast is-hidden"></div>
+
+  <script src="./js/core.js"></script>
+  <script src="./js/audio.js"></script>
+  <script src="./js/theme.js"></script>
+  <script src="./js/renderer.js"></script>
+  <script src="./js/app.js"></script>
+</body>
+</html>
