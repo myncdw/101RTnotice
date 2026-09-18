@@ -8,7 +8,7 @@ FROM node:22-alpine
 #      busybox date 解析不了时区名所致，不影响应用行为，请以启动日志为准。
 ENV NODE_ENV=production \
     PORT=8686 \
-    DATA_DIR=/data \
+    DATA_DIR=/data/101rtnotice \
     TZ=Asia/Shanghai
 
 WORKDIR /app
@@ -30,13 +30,14 @@ COPY src ./src
 COPY public ./public
 COPY LICENSE ./
 
-RUN mkdir -p /data && chown -R node:node /data /app
+RUN mkdir -p /data/101rtnotice && chown -R node:node /data /app
 
 USER node
 
 EXPOSE 8686
 
-# 数据目录：房间与消息通过卷映射持久化，容器重启不丢
+# 数据目录：房间与消息通过卷映射持久化，容器重启不丢。
+# 只占 /data 下的一个子目录，方便 /data 同时挂载给其它应用。
 VOLUME ["/data"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \

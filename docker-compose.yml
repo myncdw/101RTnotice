@@ -20,7 +20,8 @@ services:
       # 服务器时间时区：影响存活期销毁、房间回收（24h 无 A 端轮询）
       TZ: Asia/Shanghai
       PORT: "8686"
-      DATA_DIR: /data
+      # 数据目录：/data 下只占一个子目录，方便 /data 同时挂载给其它应用
+      DATA_DIR: /data/101rtnotice
     volumes:
       # 命名卷：房间与消息落盘在此，容器重启 / 重建均不丢失
       - rtn-data:/data

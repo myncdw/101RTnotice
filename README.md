@@ -15,7 +15,7 @@
 | 服务端 | Node.js 20+ / Express 4（单进程，无数据库） |
 | 前端 | 原生 HTML / CSS / JS（无构建步骤，无框架） |
 | 持久化 | 每个房间一个目录，JSON 文件 + 原子写入（临时文件 → fsync → rename） |
-| 交付 | 单一 Docker 镜像，数据目录 `/data` 通过卷映射持久化 |
+| 交付 | 单一 Docker 镜像，数据目录 `/data/101rtnotice` 通过卷映射持久化 |
 
 ```
 .
@@ -428,13 +428,37 @@ docker run -e TZ=Asia/Shanghai ...
 ## 7. 数据与持久化
 
 ```
-/data/rooms/<ROOMID>/room.json      房间元信息 + 房间级设置 + 最近一次 A 端轮询时间
-/data/rooms/<ROOMID>/message.json   当前消息（消息单独存放于独立文件夹）
+/data/101rtnotice/rooms/<ROOMID>/room.json      房间元信息 + 房间级设置 + 最近一次 A 端轮询时间
+/data/101rtnotice/rooms/<ROOMID>/message.json   当前消息（消息单独存放于独立文件夹）
 ```
+
+卷挂在 `/data`，应用只占其中的 `101rtnotice/` 子目录，所以 `/data` 可以同时挂给其它应用。
+想换位置就改环境变量 `DATA_DIR`（比如 `DATA_DIR=/data/other-app`）。
 
 - 每次变更使用「临时文件 → `fsync` → `rename`」原子写入，断电不会产生半截 JSON；
 - A 端心跳（每 5 秒一次）在内存中累积，**每 60 秒**批量回写一次，退出前强制落盘；
 - **容器重启后**：房间与当前消息不丢失；所有未到期的存活期按原定时刻继续生效，重启期间已到期的会立即补一次销毁。
+
+### 从旧版本（数据在 `/data/rooms`）升级
+
+早期版本直接用 `/data` 作为数据目录。升级后应用改在 `/data/101rtnotice` 下读写，
+**旧数据不会自动迁移**（表现为房间「消失」）。先停机搬一次即可：
+
+```bash
+docker compose stop
+docker run --rm -v rtn-data:/data node:22-alpine node -e "
+const fs = require('fs');
+fs.mkdirSync('/data/101rtnotice', { recursive: true });
+if (fs.existsSync('/data/rooms') && !fs.existsSync('/data/101rtnotice/rooms')) {
+  fs.renameSync('/data/rooms', '/data/101rtnotice/rooms');
+  console.log('已迁移到 /data/101rtnotice/rooms');
+}
+console.log('当前内容:', fs.readdirSync('/data/101rtnotice'));
+"
+docker compose up -d
+```
+
+> 卷名以 `docker volume ls` 为准。若用了自定义项目名，前缀会不是 `rtn-data`。
 
 ---
 
