@@ -256,8 +256,44 @@ async function flushDirty() {
 
 // ---------------------------------------------------------------- 对外
 
+/**
+ * 启动预检：数据目录必须可写。
+ *
+ * 最常见的场景是把宿主机目录绑定到容器：Docker 发现目录不存在时会自动创建，
+ * 但属主是 root，而容器内以 uid 1000 运行 —— 于是启动就 EACCES。
+ * 这里把它翻译成一句能照着做的提示，而不是抛一串堆栈后无限重启。
+ */
+async function assertDataDirWritable() {
+  try {
+    await fsp.mkdir(config.dataDir, { recursive: true });
+    const probe = path.join(config.dataDir, '.write-check');
+    await fsp.writeFile(probe, 'ok');
+    await fsp.rm(probe, { force: true });
+  } catch (err) {
+    const uid = typeof process.getuid === 'function' ? process.getuid() : '?';
+    console.error('');
+    console.error('  ✖ 数据目录不可写，服务无法启动');
+    console.error(`    目录：${config.dataDir}`);
+    console.error(`    原因：${err.code || ''} ${err.message}`);
+    console.error(`    当前进程 uid：${uid}（容器内为 node 用户）`);
+    console.error('');
+    console.error('  若这里绑定的是宿主机目录，Docker 自动创建时属主会是 root。');
+    console.error('  在宿主机上执行：');
+    console.error('');
+    console.error(`    sudo mkdir -p ${config.dataDir}`);
+    console.error(`    sudo chown -R 1000:1000 ${config.dataDir}`);
+    console.error('');
+    console.error('  然后 docker compose restart。详见 OPS.md 6.9。');
+    console.error('');
+    err.rtnPreflight = true; // 已经打印过友好提示，调用方不必再打堆栈
+    throw err;
+  }
+}
+
 /** 启动时从数据目录恢复全部房间 */
 async function init() {
+  await assertDataDirWritable();
+
   await fsp.mkdir(roomsRoot, { recursive: true });
   const entries = await fsp.readdir(roomsRoot, { withFileTypes: true });
   let loaded = 0;

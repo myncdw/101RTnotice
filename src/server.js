@@ -340,6 +340,9 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('[server] 启动失败：', err);
+  // 数据目录不可写等预检失败已经在 store 里打印过可操作的提示，不再重复堆栈
+  if (!err || !err.rtnPreflight) {
+    console.error('[server] 启动失败：', err);
+  }
   process.exit(1);
 });
