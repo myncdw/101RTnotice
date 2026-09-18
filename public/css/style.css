@@ -16,6 +16,7 @@
   --primary: #2563eb;
   --primary-fg: #ffffff;
   --danger: #dc2626;
+  --warn: #d97706;
   --ok: #16a34a;
   --shadow: 0 12px 36px rgba(15, 23, 42, 0.14);
 }
@@ -30,6 +31,7 @@
   --primary: #3b82f6;
   --primary-fg: #ffffff;
   --danger: #f87171;
+  --warn: #fbbf24;
   --ok: #4ade80;
   --shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
 }
@@ -113,6 +115,27 @@ body {
   min-height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+/* 顶部告警横幅：无人查看过久，房间即将被回收 */
+.banner {
+  padding: 10px 16px 11px;
+  background: color-mix(in srgb, var(--warn) 16%, var(--card));
+  border-bottom: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+}
+
+.banner-main {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--warn);
+}
+
+.banner-sub {
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
 }
 
 .topbar {

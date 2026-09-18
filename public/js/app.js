@@ -34,6 +34,11 @@
   /** 密码长度下限（服务端不做强度校验，仅客户端约束） */
   const MIN_PASSWORD_LENGTH = 6;
 
+  /** 无人查看多久后开始显示房间回收倒计时横幅（仅前端展示阈值） */
+  const IDLE_WARN_MS = 30 * 60 * 1000;
+  /** 横幅倒计时的刷新间隔 */
+  const BANNER_TICK_MS = 1000;
+
   const state = {
     roomId: null,
     role: null,          // 'view' | 'edit' | null
@@ -52,6 +57,10 @@
     lastPushClickAt: 0,
     pendingRoomId: null,
     pendingPassword: null,
+    // 房间回收倒计时（来自服务端，之后本地递减）
+    idleMs: 0,
+    recycleRemainMs: 0,
+    recycleFetchedAt: 0,
   };
 
   let wakeLock = null;
@@ -143,6 +152,7 @@
     if (payload.settings) state.settings = payload.settings;
     if (payload.enc !== undefined) state.enc = payload.enc || null;
     state.message = payload.message || null;
+    applyRecycleInfo(payload);
 
     if (role === 'A') {
       const night = RTN.theme.isNight(state.settings);
@@ -169,12 +179,64 @@
 
     // B 端：同步界面主题
     RTN.theme.applyShellTheme(RTN.theme.isNight(state.settings));
+    updateRecycleBanner();
     if (state.screen === 'settings') {
       fillSettingsForm();
       if (JSON.stringify(state.settings) !== previousSettings) {
         RTN.toast('房间设置已被其他设备更新');
       }
     }
+  }
+
+  // ================================================================
+  // 房间回收倒计时横幅
+  // ================================================================
+
+  /** 记录服务端的回收倒计时信息，之后在本地按秒递减（避免依赖本机时钟准确） */
+  function applyRecycleInfo(payload) {
+    if (!Number.isFinite(payload.recycleAt) || !Number.isFinite(payload.idleMs)) return;
+    state.idleMs = payload.idleMs;
+    state.recycleRemainMs = Math.max(0, payload.recycleAt - payload.serverTime);
+    state.recycleFetchedAt = Date.now();
+  }
+
+  function formatSpan(ms) {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    if (h > 0) return `${h} 小时 ${m} 分`;
+    if (m > 0) return `${m} 分 ${s} 秒`;
+    return `${s} 秒`;
+  }
+
+  function formatElapsed(ms) {
+    const min = Math.floor(Math.max(0, ms) / 60000);
+    if (min < 60) return `${min} 分钟`;
+    return `${Math.floor(min / 60)} 小时 ${min % 60} 分`;
+  }
+
+  function updateRecycleBanner() {
+    const banner = $('recycleBanner');
+    if (!banner) return;
+
+    // 查看模式意味着 A 端正在轮询，心跳一直是新的，不必打扰
+    if (state.screen === 'view' || !state.roomId || !state.recycleFetchedAt) {
+      hide(banner);
+      return;
+    }
+
+    // 距上次拿到服务端数据过了多久，就在原值上补多少
+    const drifted = Date.now() - state.recycleFetchedAt;
+    const idleNow = state.idleMs + drifted;
+    if (idleNow < IDLE_WARN_MS) {
+      hide(banner);
+      return;
+    }
+
+    $('recycleBannerMain').textContent =
+      `已 ${formatElapsed(idleNow)} 无人查看，房间将在 ${formatSpan(state.recycleRemainMs - drifted)} 后回收`;
+    show(banner);
   }
 
   // ================================================================
@@ -227,6 +289,7 @@
   function goTo(screen) {
     state.screen = screen;
     stopPolling();
+    updateRecycleBanner();
 
     hide($('appShell'));
     hide($('viewStage'));
@@ -321,6 +384,10 @@
     state.pushBusy = false;
     state.pendingRoomId = null;
     state.pendingPassword = null;
+    state.idleMs = 0;
+    state.recycleRemainMs = 0;
+    state.recycleFetchedAt = 0;
+    hide($('recycleBanner'));
 
     // 重置入口弹窗
     $('customRoomInput').value = '';
@@ -359,6 +426,7 @@
       if (payload.settings) state.settings = payload.settings;
       state.enc = payload.enc || null;
       state.message = payload.message || null;
+      applyRecycleInfo(payload);
       loaded = true;
     } catch (err) {
       if (err.code === 'ROOM_NOT_FOUND') {
@@ -1007,6 +1075,9 @@
 
   function boot() {
     RTN.renderer.init();
+
+    // 回收倒计时按秒刷新（不需要时只做两次 class 检查，开销可忽略）
+    setInterval(updateRecycleBanner, BANNER_TICK_MS);
 
     // 夜间边界兜底：即使不在轮询也保证界面主题跟随本地时间
     setInterval(() => {

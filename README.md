@@ -23,7 +23,7 @@
 ├── docker-compose.yml
 ├── package.json
 ├── src
-│   ├── config.js      全局参数（房间长度/字符集、6h 回收、3s 丢弃窗口、字号上下限…）
+│   ├── config.js      全局参数（房间长度/字符集、24h 回收、3s 丢弃窗口、字号上下限…）
 │   ├── store.js       房间与消息的读写、原子落盘、房间回收
 │   ├── expiry.js      存活期定时器（内存定时器 + 启动时重建）
 │   └── server.js      Express 应用与接口
@@ -238,8 +238,8 @@ curl -s http://127.0.0.1:8686/api/health
 服务器重启期间，A 端会保留当前画面并持续静默重试，恢复后 **≤15 秒**内自动同步到最新内容，
 不会出现空白或报错画面。
 
-同时 A 端心跳（`lastSeenA`）是**落盘**的，所以重启不会重置 6 小时回收倒计时 ——
-只要停机时间累计不超过 6 小时，房间与消息都不会丢。
+同时 A 端心跳（`lastSeenA`）是**落盘**的，所以重启不会重置 24 小时回收倒计时 ——
+只要停机时间累计不超过 24 小时，房间与消息都不会丢。
 
 ---
 
@@ -274,7 +274,7 @@ docker run -e TZ=Asia/Shanghai ...
 | 2 | 每次打开 / 重载页面后**手动点击一次「查看」** | 浏览器自动播放策略所限，音频解锁必须由用户手势触发；页面会显示一个半透明「查看」按钮提醒 |
 | 3 | 保持联网 | 建议通过 HTTPS 域名访问 |
 | 4 | 建议物理横放 | 全屏与横屏锁定为尽力能力，不支持时靠响应式布局兜底 |
-| 5 | 房间存续依赖 A 端 | 连续 **6 小时**无 A 端轮询，房间、消息与设置会被服务器删除 |
+| 5 | 房间存续依赖 A 端 | 连续 **24 小时**无 A 端轮询，房间、消息与设置会被服务器删除 |
 
 **页面级兜底能力**（尽力而为，失败不影响使用）：
 `navigator.wakeLock` 屏幕常亮、`requestFullscreen()` 全屏、`screen.orientation.lock('landscape')` 横屏锁定。
@@ -306,6 +306,7 @@ docker run -e TZ=Asia/Shanghai ...
 | 密码记忆 | 加入过的房间号与密码存在浏览器本地（各保留最近 20 个），下次在「加入」面板会自动预填，不用再输一遍 |
 | 背景色 / 字体色 | 背景色预设：红 / 橙 / 黄 / 蓝 / 绿 / 黑 / 无；字体色预设：黑 / 白 / 红。两者都支持「自定义」Hex + 取色器，选「自定义」才启用右侧输入框 |
 | 字体大小与字体族 | 两者都是**房间级**设置（在「设置」页），A 端显示跟着变。字体族留空 = 系统默认；填了会拼在系统字体栈**前面**，设备上没装该字体时自动回落，不会变成空白 |
+| 回收倒计时横幅 | **无人查看超过 30 分钟**后，页面顶部显示横幅，告知已多久无人查看、距房间回收还剩多少时间（逐秒递减）。一旦有设备进入「查看」模式，心跳刷新，横幅自动消失 |
 | 断网 | A 端保留当前画面并静默持续重试，不出现空白或报错画面 |
 
 ### 5.1 通知加密（可选密码）
@@ -350,7 +351,7 @@ docker run -e TZ=Asia/Shanghai ...
 | `GET` | `/api/health` | 健康检查（含 `serverTime`） |
 | `POST` | `/api/rooms` | 创建房间。`roomId` 留空 => 随机生成 4 位；填了则作为**自定义房间号**（已被占用返回 `409 ROOM_EXISTS`，格式非法返回 `400 INVALID_ROOM_ID`）。`enc` 传入客户端生成的加密参数则创建加密房间 |
 | `GET` | `/api/rooms/:roomId` | 加入前的存在性校验，返回 `enc`（有值则客户端需先本地验密码） |
-| `GET` | `/api/rooms/:roomId/state?role=A\|B` | 轮询。`role=A` 会记录 A 端心跳（房间存续唯一依据），`role=B` 不计入活跃度 |
+| `GET` | `/api/rooms/:roomId/state?role=A\|B` | 轮询。`role=A` 会记录 A 端心跳（房间存续唯一依据），`role=B` 不计入活跃度。返回里带 `idleMs`（距上次 A 端轮询多久）与 `recycleAt`（预计回收时刻），供前端画回收倒计时横幅 |
 | `POST` | `/api/rooms/:roomId/messages` | 推送消息，整条覆盖上一条 |
 | `PUT` | `/api/rooms/:roomId/settings` | 更新房间设置（字号、夜间时间） |
 
@@ -442,7 +443,8 @@ docker run -e TZ=Asia/Shanghai ...
 | 参数 | 值 | 对应 PRD |
 |---|---|---|
 | `roomIdLength` / `roomIdAlphabet` | 4 位 / `A-Z0-9` | 见第 10 节（原 PRD 为 8 位） |
-| `roomRecycleMs` | **6 小时** | 见第 10 节（原 PRD 为 24 小时） |
+| `roomRecycleMs` | 24 小时 | 4.1 |
+| `idleWarnMs`（前端） | 30 分钟（无人查看多久后显示回收倒计时横幅） | 见 5 节 |
 | `sweepIntervalMs` | 60 秒 | 巡检 + 心跳回写 |
 | `maxTextLength` | 100 | 4.2 |
 | `maxEncryptedTextLength` | 2000（密文上限） | 5.1 |
@@ -450,7 +452,7 @@ docker run -e TZ=Asia/Shanghai ...
 | `defaultFontSize` / `minFontSize` | 42 / 24 | 4.3 / 4.6 |
 | `maxFontFamilyLength` | 100（自定义字体族长度上限） | 见 5 节 |
 
-前端常量集中在 `public/js/app.js` 顶部：轮询 5 秒（A）/ 30 秒（B）、loading 5 秒、冷却 10 秒、重试 3 次、字号下限 24；
+前端常量集中在 `public/js/app.js` 顶部：轮询 5 秒（A）/ 30 秒（B）、loading 5 秒、冷却 10 秒、重试 3 次、字号下限 24、回收横幅阈值 30 分钟；
 滚动参数在 `public/js/renderer.js`：`SCROLL_SPEED = 20` px/s、`SCROLL_PAUSE = 5000` ms。
 
 ---
@@ -462,7 +464,7 @@ docker run -e TZ=Asia/Shanghai ...
 | 1–2 | 创建 / 加入、房间不存在提示 | `public/js/app.js` 入口弹窗 + `GET /api/rooms/:roomId` |
 | 3–4 | localStorage 记忆、房间消失回弹窗 | `RTN.session` + `handleRoomGone()` |
 | 5 | 多台 A / 多台 B 同时在线 | 身份不固定，无连接数限制 |
-| 6 | 6 小时无 A 端轮询回收房间 | `store.sweep()` + `lastSeenA` |
+| 6 | 24 小时无 A 端轮询回收房间 | `store.sweep()` + `lastSeenA` |
 | 7–8 | 100 字上限与实时计数、背景「无」= 白底 | `maxlength` + `input` 计数；`#ffffff` 选项 |
 | 9–10 | 存活期次日确认、不显示剩余时长 | `btnPush` 处理流程 + `RTN.dialog` |
 | 11 | loading 5 秒、10 秒冷却、3 秒丢弃窗口 | `countdownLoading()` / `PUSH_COOLDOWN_MS` / `server.js` 丢弃判断 |
@@ -506,11 +508,10 @@ PRD 未明确、实现时做了取舍，列在这里便于复核：
    拿到该设备的人可以读到密码 —— 这是为可用性做的权衡，详见 5.1。
 10. **创建房间时必须先产生房间号**：去掉了「留空则随机」的隐式行为，改为显式的
     「随机房间号」按钮 + 自填输入框，避免用户不知道房间号到底是多少。
-11. **房间回收由 24 小时缩短为 6 小时**：PRD 4.1 为 24 小时。缩短后房间与消息
-    在 A 端离线 6 小时后即被清空，意在更快释放短房间号的号段。
-
-    > ⚠️ A 端断网 / 没电超过 6 小时，房间、消息与设置都会丢。要改回去只需调整
-    > `src/config.js` 的 `roomRecycleMs`。
+11. **房间回收回 24 小时**：PRD 4.1 即为 24 小时（中途曾缩短到 6 小时，现已改回）。
+    为避免「设备离线很久却毫无感知」，前端在**无人查看超过 30 分钟**后会显示
+    回收倒计时横幅，详见 5 节。要调整阈值只需改 `src/config.js` 的 `roomRecycleMs`
+    与 `public/js/app.js` 的 `IDLE_WARN_MS`。
 12. **「加入过的房间」小账本存在浏览器本地**：用于退出后快速重新加入（见 5 节），
     与当前会话 `rtn.session` 分开存放，上限 20 条。它同样是**明文密码**，
     与 5.1 的密码记忆是同一个权衡。

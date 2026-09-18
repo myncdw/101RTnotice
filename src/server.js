@@ -51,14 +51,19 @@ function publicMessage(message) {
 }
 
 function publicRoom(room) {
+  const now = Date.now();
   return {
     ok: true,
-    serverTime: Date.now(),
+    serverTime: now,
     roomId: room.roomId,
     settings: room.settings,
     // 加密参数（盐 + 迭代次数 + 校验密文）。
     // 客户端用它本地校验密码并派生密钥；服务端不持有密码，无法解密任何通知。
     enc: room.enc || null,
+    // 房间回收倒计时：以最后一次 A 端轮询为准，B 端轮询不计入活跃度
+    lastSeenA: room.lastSeenA,
+    idleMs: Math.max(0, now - room.lastSeenA),
+    recycleAt: room.lastSeenA + config.roomRecycleMs,
     message: publicMessage(room.message),
   };
 }
@@ -285,7 +290,7 @@ async function main() {
   // 重启后重建所有未到期的存活期定时器
   expiry.restoreAll(rooms);
 
-  // 6 小时无 A 端轮询即回收房间；顺带回写心跳
+  // 24 小时无 A 端轮询即回收房间；顺带回写心跳
   sweepTimer = setInterval(async () => {
     try {
       const removed = await store.sweep();

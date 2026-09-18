@@ -21,6 +21,12 @@
 
   <!-- ==================== 应用外壳（B 端 / 设置） ==================== -->
   <div id="appShell" class="app-shell is-hidden">
+    <!-- 无人查看过久时的房间回收倒计时横幅 -->
+    <div id="recycleBanner" class="banner is-hidden" role="status">
+      <div class="banner-main" id="recycleBannerMain"></div>
+      <div class="banner-sub">厨房设备可能已离线，请检查它是否仍在充电、亮屏并联网</div>
+    </div>
+
     <header class="topbar">
       <div class="topbar-left">
         <span class="room-badge" id="roomBadge">----</span>
