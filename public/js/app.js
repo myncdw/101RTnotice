@@ -99,6 +99,24 @@
     return data;
   }
 
+  /**
+   * 把请求异常转成对用户可读的文案。
+   * 远程部署排查时最需要区分两种情况：根本连不上服务器，还是服务端明确返回了错误码。
+   * 之前统一显示「创建失败，请稍后重试」会把这两者混为一谈，无从下手。
+   */
+  function describeError(err, fallback) {
+    const code = err && err.code;
+    const status = err && err.status;
+    if (code === 'NETWORK_ERROR') {
+      return `连不上服务器，请确认服务正在运行（${location.origin}）`;
+    }
+    if (code && code !== 'HTTP_ERROR') {
+      return `${err.message || code}（${code}${status ? ` / HTTP ${status}` : ''}）`;
+    }
+    if (status) return `${fallback}（HTTP ${status}）`;
+    return fallback;
+  }
+
   const jsonInit = (method, body) => ({
     method,
     headers: { 'Content-Type': 'application/json' },
@@ -602,10 +620,11 @@
       $('btnCreateEnter').disabled = false;
       RTN.toast(password ? '加密房间已创建' : '房间已创建');
     } catch (err) {
+      console.error('[create] 创建房间失败', err);
       if (err.code === 'ROOM_EXISTS' || err.code === 'INVALID_ROOM_ID' || err.code === 'INVALID_ENC') {
         errEl.textContent = err.message || ROOM_ID_HINT;
       } else {
-        errEl.textContent = '创建失败，请稍后重试';
+        errEl.textContent = describeError(err, '创建失败，请稍后重试');
       }
       show(errEl);
     } finally {
@@ -679,7 +698,10 @@
       RTN.knownRooms.remember(roomId, password);
       enterRoom(null);
     } catch (err) {
-      errEl.textContent = err.code === 'ROOM_NOT_FOUND' ? '房间不存在' : '连接失败，请重试';
+      console.error('[join] 加入房间失败', err);
+      errEl.textContent = err.code === 'ROOM_NOT_FOUND'
+        ? '房间不存在'
+        : describeError(err, '连接失败，请重试');
       show(errEl);
     } finally {
       btn.disabled = false;
