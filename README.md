@@ -448,26 +448,39 @@ docker run -e TZ=Asia/Shanghai ...
 - A 端心跳（每 5 秒一次）在内存中累积，**每 60 秒**批量回写一次，退出前强制落盘；
 - **容器重启后**：房间与当前消息不丢失；所有未到期的存活期按原定时刻继续生效，重启期间已到期的会立即补一次销毁。
 
-### 从旧版本（数据在 `/data/rooms`）升级
+### 从旧版本升级（数据在命名卷里）
 
-早期版本直接用 `/data` 作为数据目录。升级后应用改在 `/data/101rtnotice` 下读写，
-**旧数据不会自动迁移**（表现为房间「消失」）。先停机搬一次即可：
+早期版本用命名卷，数据落在 `/var/lib/docker/volumes/<项目名>_rtn-data/_data`（或更早的 `/data`）下。
+现在的默认配置改成了**绑定宿主目录**，两边互不相通，**旧数据不会自动迁移**（表现为房间「消失」）。
+
+先建好宿主目录，停机搬一次即可：
 
 ```bash
+# 1) 宿主机建目录并交权（容器内以 uid 1000 的 node 用户运行）
+sudo mkdir -p /data/101rtnotice
+sudo chown -R 1000:1000 /data/101rtnotice
+
+# 2) 停机，把旧卷里的数据拷到宿主目录
 docker compose stop
-docker run --rm -v rtn-data:/data node:22-alpine node -e "
+docker run --rm \
+  -v 101rtnotice_rtn-data:/src \
+  -v /data/101rtnotice:/dst \
+  node:22-alpine node -e "
 const fs = require('fs');
-fs.mkdirSync('/data/101rtnotice', { recursive: true });
-if (fs.existsSync('/data/rooms') && !fs.existsSync('/data/101rtnotice/rooms')) {
-  fs.renameSync('/data/rooms', '/data/101rtnotice/rooms');
+fs.mkdirSync('/dst', { recursive: true });
+if (fs.existsSync('/src/rooms') && !fs.existsSync('/dst/rooms')) {
+  fs.cpSync('/src/rooms', '/dst/rooms', { recursive: true });
   console.log('已迁移到 /data/101rtnotice/rooms');
 }
-console.log('当前内容:', fs.readdirSync('/data/101rtnotice'));
+console.log('当前内容:', fs.readdirSync('/dst'));
 "
+
+# 3) 起来
 docker compose up -d
 ```
 
-> 卷名以 `docker volume ls` 为准。若用了自定义项目名，前缀会不是 `rtn-data`。
+> - 卷名以 `docker volume ls` 为准。若用了自定义项目名，前缀会不是 `101rtnotice_`。
+> - 确认数据无误后，旧卷可以删掉：`docker volume rm 101rtnotice_rtn-data`。
 
 ---
 
