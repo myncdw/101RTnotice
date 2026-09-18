@@ -272,6 +272,67 @@ systemctl is-enabled docker                                               # 应�
 两个都要满足。如果之前用过 `docker stop` / `docker kill`，策略会被挂起，
 需要 `docker compose up -d` 重新应用。详见 README 2.7。
 
+### 6.9 ⚠️ 容器无限重启（Restarting）
+
+**先跑这三条，一眼定位：**
+
+```bash
+docker compose ps
+docker inspect 101rtnotice --format '退出码: {{.State.ExitCode}}  重启次数: {{.RestartCount}}'
+docker compose logs --tail 50
+```
+
+退出码是最快的分诊依据：
+
+| 退出码 | 现象 | 大概率原因 |
+|---|---|---|
+| `1` | 日志有 `EACCES` | **数据目录权限**（最常见，见下） |
+| `1` | 日志有 `EADDRINUSE` | 端口 8686 被占用 |
+| `1` | 日志有 `ENOENT` | 数据目录不存在 |
+| `0` | 反复重启 | 有外部进程在停它（宿主机 watchdog 之类） |
+
+#### 原因 1：宿主目录权限（换成绑定挂载后最容易踩）
+
+命名卷与绑定宿主目录的**权限行为完全不同**：
+
+| 存储方式 | 数据目录怎么来的 | 属主 |
+|---|---|---|
+| 命名卷 | Docker 从镜像里拷过去（含属主） | `node` (uid 1000) ✅ |
+| **绑定宿主目录** | **Docker 直接建一个空目录，属主 root** | **root** ❌ |
+
+容器内以 uid 1000 运行，写不进去 → 启动报 `EACCES` → 退出 → 被 `restart` 拉起 → 无限循环。
+
+```bash
+ls -ld /data/101rtnotice        # 显示 root root 就是这个原因
+```
+
+```bash
+sudo mkdir -p /data/101rtnotice
+sudo chown -R 1000:1000 /data/101rtnotice
+docker compose restart
+```
+
+#### 原因 2：端口被占用
+
+常见于旧容器没清干净（比如从命名卷切到宿主目录时留下的那个）。
+
+```bash
+docker ps -a                     # 有没有别的容器占着 8686
+ss -ltnp | grep 8686             # 端口被谁占了
+docker compose down              # 先清本项目的
+docker rm -f <占端口的容器名>     # 再清旧的
+docker compose up -d
+```
+
+#### 原因 3：数据目录被删或路径写错
+
+```bash
+grep -A2 'volumes:' docker-compose.yml   # 确认绑定路径
+ls -ld /data/101rtnotice
+```
+
+若目录不存在，Docker 会自动建（属主 root），回到原因 1。
+
 ---
 
 ## 7. 安全
