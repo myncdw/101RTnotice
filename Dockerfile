@@ -36,9 +36,9 @@ USER node
 
 EXPOSE 8686
 
-# 数据目录：房间与消息通过卷映射持久化，容器重启不丢。
+# 数据目录：房间与消息通过卷 / 绑定目录持久化，容器重启不丢。
 # 只占 /data 下的一个子目录，方便 /data 同时挂载给其它应用。
-VOLUME ["/data"]
+VOLUME ["/data/101rtnotice"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8686)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

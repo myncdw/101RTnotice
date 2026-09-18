@@ -65,13 +65,21 @@ docker run -d \
   101rtnotice:1.0.0
 ```
 
-### 2.3 改用宿主目录存数据（便于备份）
+### 2.3 数据存在宿主机 /data/101rtnotice（默认）
+
+`docker-compose.yml` 已把宿主机的 `/data/101rtnotice` 直接映射到容器的同路径，
+所以房间数据在宿主机上就能看到，备份只需 `rsync` 或打快照。
+
+**首次使用需先建目录并交权**（容器内以 uid 1000 的 `node` 用户运行）：
 
 ```bash
-mkdir -p ./data && sudo chown -R 1000:1000 ./data
+sudo mkdir -p /data/101rtnotice
+sudo chown -R 1000:1000 /data/101rtnotice
 ```
 
-然后在 `docker-compose.yml` 中改用 `- ./data:/data`（容器内以 uid 1000 的 `node` 用户运行）。
+> 不想用宿主目录，就改用命名卷：把 `docker-compose.yml` 里那行绑定换成
+> `- rtn-data:/data/101rtnotice`（`.dockerignore` 已忽略项目内的 `data/`）。
+> 命名卷的好处是不用管权限，代价是要进容器才能看到文件。
 
 ### 2.4 用 localhost 先跑一遍（开发）
 
@@ -432,8 +440,9 @@ docker run -e TZ=Asia/Shanghai ...
 /data/101rtnotice/rooms/<ROOMID>/message.json   当前消息（消息单独存放于独立文件夹）
 ```
 
-卷挂在 `/data`，应用只占其中的 `101rtnotice/` 子目录，所以 `/data` 可以同时挂给其它应用。
-想换位置就改环境变量 `DATA_DIR`（比如 `DATA_DIR=/data/other-app`）。
+容器内与宿主机是**同一个路径**（`docker-compose.yml` 里做了绑定挂载），
+所以直接在宿主机上 `ls /data/101rtnotice/rooms` 就能看到。
+想换位置就改环境变量 `DATA_DIR` 和 compose 里的绑定路径（两处要一致）。
 
 - 每次变更使用「临时文件 → `fsync` → `rename`」原子写入，断电不会产生半截 JSON；
 - A 端心跳（每 5 秒一次）在内存中累积，**每 60 秒**批量回写一次，退出前强制落盘；

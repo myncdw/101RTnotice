@@ -23,11 +23,13 @@ services:
       # 数据目录：/data 下只占一个子目录，方便 /data 同时挂载给其它应用
       DATA_DIR: /data/101rtnotice
     volumes:
-      # 命名卷：房间与消息落盘在此，容器重启 / 重建均不丢失
-      - rtn-data:/data
-      # 如需改成宿主目录便于备份，改用下面这行，并先执行：
-      #   mkdir -p ./data && sudo chown -R 1000:1000 ./data
-      # - ./data:/data
+      # 直接映射到宿主机目录：备份只需 rsync / 打快照，不用进容器捞。
+      # 首次使用需先建目录并给权限（容器内以 uid 1000 的 node 用户运行）：
+      #   sudo mkdir -p /data/101rtnotice
+      #   sudo chown -R 1000:1000 /data/101rtnotice
+      - /data/101rtnotice:/data/101rtnotice
+      # 不想用宿主目录的话，注释上面一行、启用下面一行（命名卷，不用管权限）：
+      # - rtn-data:/data/101rtnotice
     healthcheck:
       test:
         - CMD
@@ -40,4 +42,5 @@ services:
       retries: 3
 
 volumes:
+  # 备选方案用：把上面的绑定目录换成 rtn-data:/data/101rtnotice 时才需要
   rtn-data:
