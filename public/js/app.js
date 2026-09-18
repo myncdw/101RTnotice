@@ -57,9 +57,9 @@
     lastPushClickAt: 0,
     pendingRoomId: null,
     pendingPassword: null,
-    // 房间回收倒计时（来自服务端，之后本地递减）
+    // 房间回收倒计时（来自服务端，之后本地递减；null 表示已关闭回收）
     idleMs: 0,
-    recycleRemainMs: 0,
+    recycleRemainMs: null,
     recycleFetchedAt: 0,
   };
 
@@ -192,11 +192,16 @@
   // 房间回收倒计时横幅
   // ================================================================
 
-  /** 记录服务端的回收倒计时信息，之后在本地按秒递减（避免依赖本机时钟准确） */
+  /**
+   * 记录服务端的回收倒计时信息，之后在本地按秒递减（不依赖本机时钟是否准确）。
+   * recycleAt 为 null 表示服务端已关闭房间回收，此时只展示离线时长。
+   */
   function applyRecycleInfo(payload) {
-    if (!Number.isFinite(payload.recycleAt) || !Number.isFinite(payload.idleMs)) return;
+    if (!Number.isFinite(payload.idleMs)) return;
     state.idleMs = payload.idleMs;
-    state.recycleRemainMs = Math.max(0, payload.recycleAt - payload.serverTime);
+    state.recycleRemainMs = Number.isFinite(payload.recycleAt)
+      ? Math.max(0, payload.recycleAt - payload.serverTime)
+      : null;
     state.recycleFetchedAt = Date.now();
   }
 
@@ -235,8 +240,14 @@
     }
 
     $('recycleBannerMain').textContent =
-      `已 ${formatElapsed(idleNow)} 无人查看，房间将在 ${formatSpan(state.recycleRemainMs - drifted)} 后回收`;
+      `A 端已离线 ${formatElapsed(idleNow)}${describeRemain(state.recycleRemainMs, drifted)}`;
     show(banner);
+  }
+
+  /** 横幅后半句：开启回收时是倒计时，关闭时明说不会被回收 */
+  function describeRemain(remainMs, drifted) {
+    if (remainMs === null) return '，房间不会被自动回收';
+    return `，房间将在 ${formatSpan(remainMs - drifted)} 后回收`;
   }
 
   // ================================================================
@@ -385,7 +396,7 @@
     state.pendingRoomId = null;
     state.pendingPassword = null;
     state.idleMs = 0;
-    state.recycleRemainMs = 0;
+    state.recycleRemainMs = null;
     state.recycleFetchedAt = 0;
     hide($('recycleBanner'));
 

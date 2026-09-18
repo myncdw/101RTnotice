@@ -382,8 +382,13 @@ async function destroyMessage(roomId) {
   return room;
 }
 
-/** 房间回收：连续 24 小时无 A 端轮询 */
+/**
+ * 房间回收：连续 roomRecycleMs 无 A 端轮询。
+ * roomRecycleMs 为 0 / null 时表示已关闭回收，直接返回空数组。
+ */
 async function sweep() {
+  if (!config.roomRecycleMs) return [];
+
   const now = Date.now();
   const expired = [];
   for (const [roomId, room] of rooms) {

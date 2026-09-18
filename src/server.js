@@ -60,10 +60,11 @@ function publicRoom(room) {
     // 加密参数（盐 + 迭代次数 + 校验密文）。
     // 客户端用它本地校验密码并派生密钥；服务端不持有密码，无法解密任何通知。
     enc: room.enc || null,
-    // 房间回收倒计时：以最后一次 A 端轮询为准，B 端轮询不计入活跃度
+    // 房间回收倒计时：以最后一次 A 端轮询为准，B 端轮询不计入活跃度。
+    // 关闭回收时 recycleAt 为 null，前端会只显示离线时长
     lastSeenA: room.lastSeenA,
     idleMs: Math.max(0, now - room.lastSeenA),
-    recycleAt: room.lastSeenA + config.roomRecycleMs,
+    recycleAt: config.roomRecycleMs ? room.lastSeenA + config.roomRecycleMs : null,
     message: publicMessage(room.message),
   };
 }
@@ -284,6 +285,16 @@ app.use((err, req, res, next) => {
 
 let sweepTimer = null;
 
+/** 启动日志里人对房间回收策略的可读描述 */
+function describeRecycle() {
+  const ms = config.roomRecycleMs;
+  if (!ms) return '已关闭（无 A 端轮询也不会回收，房间会一直保留）';
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 60) return `${minutes} 分钟无 A 端轮询`;
+  const hours = ms / 3600000;
+  return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} 小时无 A 端轮询`;
+}
+
 async function main() {
   const rooms = await store.init();
 
@@ -309,6 +320,7 @@ async function main() {
     const abs = Math.abs(offsetMin);
     console.log(`[server] 101实时通知 已启动：http://${config.host}:${config.port}`);
     console.log(`[server] 服务器时间：${new Date().toString()} (UTC${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')})`);
+    console.log(`[server] 房间回收：${describeRecycle()}`);
     console.log('[server] 注意：存活期销毁、房间回收、3 秒丢弃窗口均以该时区的服务器时间为准');
   });
 
