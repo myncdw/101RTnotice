@@ -6,6 +6,9 @@
 本项目按一份内部产品需求文档（PRD v1.0）实现。文中出现的「PRD 4.1」「PRD 4.2」等
 是该文档的条目编号，用于说明每条规则的出处。
 
+> 📘 **部署、备份、升级、故障排查** 见 **[运维指南 OPS.md](./OPS.md)**。
+> 本文档说明「为什么这么设计」，OPS.md 说明「怎么跑和维护」。
+
 ---
 
 ## 1. 技术栈与结构
@@ -21,6 +24,7 @@
 .
 ├── Dockerfile
 ├── docker-compose.yml
+├── OPS.md              运维指南（部署、备份、升级、故障排查）
 ├── package.json
 ├── src
 │   ├── config.js      全局参数（房间长度/字符集、24h 回收、3s 丢弃窗口、字号上下限…）
@@ -75,11 +79,19 @@ docker run -d \
 ```bash
 sudo mkdir -p /data/101rtnotice
 sudo chown -R 1000:1000 /data/101rtnotice
+sudo chmod 700 /data/101rtnotice          # 见下方说明，建议加上
 ```
 
+> **为什么要 `chmod 700`**：`/data` 在根目录下，默认权限是 755、文件是 644，
+> 于是**这台机器上的任何用户都能读到 `room.json` 与 `message.json`**。
+> 房间若开了加密，读到的只是密文；**没加密的话就是明文通知内容**。
+> 单人机器无所谓，多人共用的机器建议收紧。
+>
+> 注意权限要作用在 `/data/101rtnotice` 上，**不要改成 700 以外的属主** ——
+> 容器内是 uid 1000，属主变了就写不进去。
+>
 > 不想用宿主目录，就改用命名卷：把 `docker-compose.yml` 里那行绑定换成
-> `- rtn-data:/data/101rtnotice`（`.dockerignore` 已忽略项目内的 `data/`）。
-> 命名卷的好处是不用管权限，代价是要进容器才能看到文件。
+> `- rtn-data:/data/101rtnotice`。命名卷的好处是不用管权限，代价是要进容器才能看到文件。
 
 ### 2.4 用 localhost 先跑一遍（开发）
 
